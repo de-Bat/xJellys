@@ -51,7 +51,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>How long to wait for a recap to be built before leaving playback alone.</summary>
     public int MaxWaitSeconds { get; set; } = 45;
 
+    /// <summary>When an episode starts, build the recap for the following episode.</summary>
     public bool PreGenerateNext { get; set; } = true;
+
+    /// <summary>When an episode stops: mid-way = build its resume recap, finished = build the next episode's recap.</summary>
+    public bool PreBuildOnStop { get; set; } = true;
 
     public int OutputHeight { get; set; } = 720;
 

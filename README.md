@@ -60,6 +60,8 @@ Choosing what gets a recap (plugin settings → **TV shows**):
 - *Only recap the shows listed below* turns the list into a whitelist. Otherwise every show gets recaps and the list only holds exceptions.
 - Shows without a rule use the global *Default recap format*.
 
+Automatic pre-building: when an episode **stops** (setting *Build recaps when playback stops*), mid-way past `Resume min seconds` → its resume recap is built for that exact position; finished (or ≥ 90%) → the **next** episode's recap is built. Starting an episode also pre-builds the next one's recap. Next time you press play the recap is already cached.
+
 Limits: the client starts the episode before the server can intercept, so the recap appears a moment after playback starts. Backing out of the recap (stop) does not auto-start the episode. Needs Jellyfin 10.9+ and episodes with a local file.
 
 Release: `git tag Jellyfin.Plugin.Jellycap-v1.0.0.0 && git push --tags`.

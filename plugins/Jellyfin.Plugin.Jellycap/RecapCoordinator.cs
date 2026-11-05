@@ -163,8 +163,14 @@ public sealed class RecapCoordinator : IHostedService
     private async Task HandleStopAsync(PlaybackStopEventArgs e)
     {
         var session = e.Session;
-        if (session is null || e.Item is null || !_pending.TryGetValue(session.Id, out var pending) || pending.RecapId != e.Item.Id)
+        if (session is null || e.Item is null)
         {
+            return;
+        }
+
+        if (!_pending.TryGetValue(session.Id, out var pending) || pending.RecapId != e.Item.Id)
+        {
+            PreBuildAfterStop(e, session);
             return;
         }
 
@@ -183,6 +189,55 @@ public sealed class RecapCoordinator : IHostedService
             session.Id,
             new PlayRequest { ItemIds = new[] { pending.EpisodeId }, PlayCommand = PlayCommand.PlayNow, StartPositionTicks = pending.StartTicks },
             CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// An episode stopped: build the recap ahead of time so it is ready next time.
+    /// Stopped mid-way -> resume recap at that position. Finished -> new-episode recap for the next episode.
+    /// </summary>
+    private void PreBuildAfterStop(PlaybackStopEventArgs e, SessionInfo session)
+    {
+        var cfg = Plugin.Instance?.Configuration;
+        if (cfg is null || !cfg.Enabled || !cfg.PreBuildOnStop || e.Item is not Episode episode
+            || _recaps.IsRecapPath(episode.Path) || !ClientMatches(cfg.ClientFilter, session, e))
+        {
+            return;
+        }
+
+        var ticks = e.PlaybackPositionTicks ?? 0;
+        var runtime = episode.RunTimeTicks ?? 0;
+        var finished = e.PlayedToCompletion || (runtime > 0 && ticks >= runtime * 0.9);
+
+        if (finished)
+        {
+            var next = _recaps.Planner.GetNext(episode);
+            if (next is null)
+            {
+                return;
+            }
+
+            var d = RecapRules.Decide(next.SeriesId, next.ParentIndexNumber, next.IndexNumber, cfg);
+            if (d.Allowed)
+            {
+                _logger.LogInformation("Pre-building recap for next episode {Episode}", next.Name);
+                _ = _recaps.EnsureRecapFileAsync(next, RecapMode.New, TimeSpan.Zero, d.Format);
+            }
+        }
+        else
+        {
+            var pos = TimeSpan.FromTicks(ticks);
+            if (pos.TotalSeconds < cfg.ResumeMinSeconds)
+            {
+                return;
+            }
+
+            var d = RecapRules.Decide(episode.SeriesId, episode.ParentIndexNumber, episode.IndexNumber, cfg);
+            if (d.Allowed)
+            {
+                _logger.LogInformation("Pre-building resume recap for {Episode} at {Pos}", episode.Name, pos);
+                _ = _recaps.EnsureRecapFileAsync(episode, RecapMode.Resume, pos, d.Format);
+            }
+        }
     }
 
     private static bool ClientMatches(string filter, SessionInfo session, PlaybackProgressEventArgs e)
