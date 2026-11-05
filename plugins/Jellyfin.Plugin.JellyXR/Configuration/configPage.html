@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>JellyXR</title></head>
+<body>
+<div id="JellyXRConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
+  <div data-role="content">
+    <div class="content-primary">
+      <h2>JellyXR</h2>
+      <p>X-Ray style cast cards. Pause on Android TV and the actors appear as a message. "On screen" needs a one-time face scan (Dashboard &rarr; Scheduled Tasks &rarr; <em>Scan videos for cast faces</em>, or automatic when an item first plays). Cast portraits must exist in Jellyfin.</p>
+      <form id="JellyXRConfigForm">
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="Enabled" type="checkbox" is="emby-checkbox" /><span>Enabled</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="ShowCharacter" type="checkbox" is="emby-checkbox" /><span>Show character name ("Actor as Character")</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="ScanOnPlayback" type="checkbox" is="emby-checkbox" /><span>Scan an item in the background when it starts playing and has no scene data</span></label>
+        </div>
+        <div id="fields"></div>
+
+        <h3 style="margin-top:2em">Per show scope</h3>
+        <div class="fieldDescription">Scope: <b>Scene</b> = people on screen around the pause, <b>Episode</b> = whole cast, <b>Current</b> = scene, or whole cast when no scene data, <b>Off</b> = no cards. Shows without a rule use the default scope above.</div>
+        <div class="selectContainer">
+          <label class="selectLabel" for="seriesPicker">Add a show</label>
+          <select id="seriesPicker" is="emby-select"></select>
+        </div>
+        <button id="addSeries" is="emby-button" type="button" class="raised block"><span>Add show</span></button>
+        <div id="rules" style="margin-top:1em"></div>
+
+        <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
+      </form>
+    </div>
+  </div>
+  <script type="text/javascript">
+    (function () {
+      var guid = '8f3c1d52-4b7e-4a0e-9d1a-6c2e5b7a9f10';
+      var page = document.querySelector('#JellyXRConfigPage');
+      var scopes = ['Scene', 'Episode', 'Current', 'Off'];
+      var rules = [];
+      var fields = [
+        ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
+        ['Scope', 'Default scope', 'select:Current|Scene|Episode|Off'],
+        ['CardMode', 'Card mode (Combined = one message, Separate = one message per actor)', 'select:Combined|Separate'],
+        ['MaxCards', 'Max cards', 'number'],
+        ['CardSeconds', 'Seconds each message stays on screen', 'number'],
+        ['SceneBackSeconds', 'Scene window: seconds before the pause position', 'number'],
+        ['SceneForwardSeconds', 'Scene window: seconds after the pause position', 'number'],
+        ['ScanIntervalSeconds', 'Scan: one frame every N seconds (rescan needed after change)', 'number'],
+        ['MatchThreshold', 'Face match threshold (0.25 loose .. 0.5 strict)', 'float'],
+        ['DetectThreshold', 'Face detection confidence (0.3 .. 0.8)', 'float'],
+        ['ModelZipUrl', 'Face model zip URL (insightface buffalo_s: det_500m.onnx + w600k_mbf.onnx; mind the model license)', 'text']
+      ];
+      var box = page.querySelector('#fields');
+      fields.forEach(function (f) {
+        var d = document.createElement('div');
+        if (f[2].indexOf('select:') === 0) {
+          d.className = 'selectContainer';
+          d.innerHTML = '<label class="selectLabel" for="' + f[0] + '">' + f[1] + '</label>' +
+            '<select id="' + f[0] + '" is="emby-select">' +
+            f[2].substring(7).split('|').map(function (o) { return '<option value="' + o + '">' + o + '</option>'; }).join('') +
+            '</select>';
+        } else {
+          d.className = 'inputContainer';
+          d.innerHTML = '<label class="inputLabel inputLabelUnfocused" for="' + f[0] + '">' + f[1] + '</label>' +
+            '<input id="' + f[0] + '" type="' + (f[2] === 'float' ? 'number" step="0.01' : f[2]) + '" is="emby-input" />';
+        }
+        box.appendChild(d);
+      });
+
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function renderRules() {
+        var host = page.querySelector('#rules');
+        if (!rules.length) {
+          host.innerHTML = '<p><em>No show rules.</em></p>';
+          return;
+        }
+        host.innerHTML = rules.map(function (r, i) {
+          var opts = scopes.map(function (o) {
+            return '<option value="' + o + '"' + (r.Scope === o ? ' selected' : '') + '>' + o + '</option>';
+          }).join('');
+          return '<div data-i="' + i + '" style="padding:.8em 1em;margin-bottom:.8em;border:1px solid rgba(128,128,128,.4);border-radius:6px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + esc(r.SeriesName) + '</strong>' +
+            '<button is="emby-button" type="button" class="raised" data-act="remove"><span>Remove</span></button></div>' +
+            '<div class="selectContainer"><label class="selectLabel">Scope</label><select is="emby-select" data-k="Scope">' + opts + '</select></div>' +
+            '</div>';
+        }).join('');
+      }
+
+      page.querySelector('#rules').addEventListener('change', function (e) {
+        var card = e.target.closest('[data-i]');
+        var k = e.target.getAttribute('data-k');
+        if (card && k) { rules[+card.getAttribute('data-i')][k] = e.target.value; }
+      });
+      page.querySelector('#rules').addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-act="remove"]');
+        var card = e.target.closest('[data-i]');
+        if (btn && card) { rules.splice(+card.getAttribute('data-i'), 1); renderRules(); }
+      });
+      page.querySelector('#addSeries').addEventListener('click', function () {
+        var sel = page.querySelector('#seriesPicker');
+        if (!sel.value) { return; }
+        if (!rules.some(function (r) { return r.SeriesId === sel.value; })) {
+          rules.push({ SeriesId: sel.value, SeriesName: sel.options[sel.selectedIndex].text, Scope: 'Scene' });
+          renderRules();
+        }
+      });
+
+      function loadSeries() {
+        return ApiClient.getItems(ApiClient.getCurrentUserId(), { IncludeItemTypes: 'Series', Recursive: true, SortBy: 'SortName', Fields: '' }).then(function (res) {
+          page.querySelector('#seriesPicker').innerHTML = (res.Items || []).map(function (s) {
+            return '<option value="' + esc(s.Id) + '">' + esc(s.Name) + '</option>';
+          }).join('');
+        });
+      }
+
+      page.addEventListener('pageshow', function () {
+        Dashboard.showLoadingMsg();
+        loadSeries().catch(function () { }).then(function () {
+          return ApiClient.getPluginConfiguration(guid);
+        }).then(function (c) {
+          page.querySelector('#Enabled').checked = c.Enabled;
+          page.querySelector('#ShowCharacter').checked = c.ShowCharacter;
+          page.querySelector('#ScanOnPlayback').checked = c.ScanOnPlayback;
+          fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
+          rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
+          renderRules();
+          Dashboard.hideLoadingMsg();
+        });
+      });
+
+      page.querySelector('#JellyXRConfigForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          c.Enabled = page.querySelector('#Enabled').checked;
+          c.ShowCharacter = page.querySelector('#ShowCharacter').checked;
+          c.ScanOnPlayback = page.querySelector('#ScanOnPlayback').checked;
+          c.SeriesRules = rules;
+          fields.forEach(function (f) {
+            var v = page.querySelector('#' + f[0]).value;
+            c[f[0]] = f[2] === 'number' ? parseInt(v, 10) : (f[2] === 'float' ? parseFloat(v) : v);
+          });
+          ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+        });
+        return false;
+      });
+    })();
+  </script>
+</div>
+</body>
+</html>

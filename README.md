@@ -65,3 +65,13 @@ Automatic pre-building: when an episode **stops** (setting *Build recaps when pl
 Limits: the client starts the episode before the server can intercept, so the recap appears a moment after playback starts. Backing out of the recap (stop) does not auto-start the episode. Needs Jellyfin 10.9+ and episodes with a local file.
 
 Release: `git tag Jellyfin.Plugin.Jellycap-v1.0.0.0 && git push --tags`.
+
+### JellyXR (`plugins/Jellyfin.Plugin.JellyXR`)
+Amazon X-Ray style cast cards for **Android TV** (any remote-controllable client; filter in plugin settings). Pause playback and the actors appear as a message on the TV.
+
+- **How "on screen" works**: a background task samples each episode/movie (one frame per `ScanIntervalSeconds`), detects faces (SCRFD) and matches them against the cast's Jellyfin portraits (ArcFace) using ONNX Runtime on CPU. The result is a per-item timeline stored in `<jellyfin data>/jellyxr/timelines`. Models (insightface `buffalo_s`, URL configurable, check its license) are downloaded on first use.
+- **Scope** (global default, per-show override): `Scene` = people seen around the pause position, `Episode` = whole cast, `Current` = scene, or whole cast if no scene data, `Off`.
+- **Cards**: `Combined` (one message) or `Separate` (one message per actor), "Actor as Character".
+- Scan runs from Dashboard → Scheduled Tasks → *Scan videos for cast faces* (daily 03:00), and in the background when an unscanned item starts playing. Needs cast portraits in Jellyfin; actors without a portrait face can't be matched.
+- Cards are sent as the Jellyfin `DisplayMessage` command; how the Android TV client renders it (toast/dialog, timeout) depends on the client version.
+- Native ONNX Runtime ships for `win-x64` and `linux-x64` only. Release tag: `Jellyfin.Plugin.JellyXR-v1.0.0.0`.

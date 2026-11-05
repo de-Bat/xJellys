@@ -41,6 +41,10 @@ jobs:
           F="${{ steps.tag.outputs.folder }}"
           ZIP="${F}_${{ steps.tag.outputs.version }}.zip"
           (cd out && zip -j "../$ZIP" "$F.dll")
+          # native deps (JellyXR): ONNX Runtime managed dll + native libs flat next to the plugin dll
+          if [ -f out/Microsoft.ML.OnnxRuntime.dll ]; then
+            zip -j "$ZIP" out/Microsoft.ML.OnnxRuntime.dll               out/runtimes/win-x64/native/onnxruntime.dll out/runtimes/linux-x64/native/libonnxruntime.so
+          fi
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
       - name: GitHub Release
