@@ -49,10 +49,9 @@ public class RecapPlanner
         return idx >= 0 && idx + 1 < all.Count ? all[idx + 1] : null;
     }
 
-    public async Task<IReadOnlyList<RecapSegment>> PlanAsync(Episode episode, RecapMode mode, TimeSpan resumePosition, PluginConfiguration cfg, CancellationToken ct)
+    public async Task<IReadOnlyList<RecapSegment>> PlanAsync(Episode episode, RecapMode mode, TimeSpan resumePosition, RecapFormat fmt, PluginConfiguration cfg, CancellationToken ct)
     {
         var segments = new List<RecapSegment>();
-        var fmt = cfg.RecapFormat;
         var withText = fmt != RecapFormat.Video;
         var withVideo = fmt != RecapFormat.Text;
         var all = GetSeriesEpisodes(episode);

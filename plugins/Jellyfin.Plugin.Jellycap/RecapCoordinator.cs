@@ -92,6 +92,13 @@ public sealed class RecapCoordinator : IHostedService
             return; // this start is us returning to the episode after the recap
         }
 
+        var decision = RecapRules.Decide(episode.SeriesId, episode.ParentIndexNumber, episode.IndexNumber, cfg);
+        if (!decision.Allowed)
+        {
+            return;
+        }
+
+        var fmt = decision.Format;
         var startTicks = e.PlaybackPositionTicks ?? 0;
         var pos = TimeSpan.FromTicks(startTicks);
         RecapMode mode;
@@ -105,7 +112,11 @@ public sealed class RecapCoordinator : IHostedService
                 var next = _recaps.Planner.GetNext(episode);
                 if (next is not null)
                 {
-                    _ = _recaps.EnsureRecapFileAsync(next, RecapMode.New, TimeSpan.Zero);
+                    var nextDecision = RecapRules.Decide(next.SeriesId, next.ParentIndexNumber, next.IndexNumber, cfg);
+                    if (nextDecision.Allowed)
+                    {
+                        _ = _recaps.EnsureRecapFileAsync(next, RecapMode.New, TimeSpan.Zero, nextDecision.Format);
+                    }
                 }
             }
         }
@@ -120,7 +131,7 @@ public sealed class RecapCoordinator : IHostedService
 
         var wait = TimeSpan.FromSeconds(Math.Max(5, cfg.MaxWaitSeconds));
         var started = DateTime.UtcNow;
-        var fileTask = _recaps.EnsureRecapFileAsync(episode, mode, pos);
+        var fileTask = _recaps.EnsureRecapFileAsync(episode, mode, pos, fmt);
         if (await Task.WhenAny(fileTask, Task.Delay(wait)).ConfigureAwait(false) != fileTask)
         {
             _logger.LogInformation("Recap for {Episode} not ready in {Wait}s; skipping this time", episode.Name, wait.TotalSeconds);

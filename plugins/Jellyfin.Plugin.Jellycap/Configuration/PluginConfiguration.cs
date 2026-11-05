@@ -12,7 +12,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Comma separated, case-insensitive substrings matched against client and device name. Empty = every remote-controllable client.</summary>
     public string ClientFilter { get; set; } = "Android TV";
 
-    /// <summary>Video clips, text cards, or both.</summary>
+    /// <summary>True = only shows listed in <see cref="SeriesRules"/> get recaps. False = every show, except rules that are disabled.</summary>
+    public bool OnlyListedSeries { get; set; }
+
+    public SeriesRule[] SeriesRules { get; set; } = Array.Empty<SeriesRule>();
+
+    /// <summary>Default format: video clips, text cards, or both. A series rule can override it.</summary>
     public RecapFormat RecapFormat { get; set; } = RecapFormat.Video;
 
     /// <summary>Language of text card labels (en, he, es, fr, de, it, pt, ru, ar) and translation target.</summary>

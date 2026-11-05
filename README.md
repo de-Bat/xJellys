@@ -55,6 +55,11 @@ Text recap (`Recap format` setting: `Video` | `Text` | `Both`):
 - **Translation**: card labels are localized (`en he es fr de it pt ru ar`). Summaries are shown in the language stored in Jellyfin; set a *Translation server URL* (LibreTranslate compatible `POST /translate`) to machine-translate them to the chosen language. Translations are cached on disk; if the server is down the original text is used.
 - **Fonts**: libass uses the server's fonts. Set *Text card font* to one that covers your language (e.g. `DejaVu Sans` on Linux for Hebrew; Windows `Arial` works).
 
+Choosing what gets a recap (plugin settings → **TV shows**):
+- Pick a show from the dropdown and add it as a rule. Per rule: switch the show off, override the format (Video/Text/Both), limit **Seasons** (`1,3-5`, `2-`, `0` = specials) and **Episodes** (numbers within the allowed seasons, e.g. `2-` = skip each season opener).
+- *Only recap the shows listed below* turns the list into a whitelist. Otherwise every show gets recaps and the list only holds exceptions.
+- Shows without a rule use the global *Default recap format*.
+
 Limits: the client starts the episode before the server can intercept, so the recap appears a moment after playback starts. Backing out of the recap (stop) does not auto-start the episode. Needs Jellyfin 10.9+ and episodes with a local file.
 
 Release: `git tag Jellyfin.Plugin.Jellycap-v1.0.0.0 && git push --tags`.

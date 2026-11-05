@@ -15,6 +15,19 @@
           <label class="emby-checkbox-label"><input id="PreGenerateNext" type="checkbox" is="emby-checkbox" /><span>Pre-build recap for next episode</span></label>
         </div>
         <div id="fields"></div>
+
+        <h3 style="margin-top:2em">TV shows</h3>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="OnlyListedSeries" type="checkbox" is="emby-checkbox" /><span>Only recap the shows listed below (otherwise every show, except the ones switched off)</span></label>
+        </div>
+        <div class="selectContainer">
+          <label class="selectLabel" for="seriesPicker">Add a show</label>
+          <select id="seriesPicker" is="emby-select"></select>
+        </div>
+        <button id="addSeries" is="emby-button" type="button" class="raised block"><span>Add show</span></button>
+        <div class="fieldDescription">Seasons / episodes: e.g. <code>1,3-5</code> or <code>2-</code> (from 2 on). Empty = all. Season 0 = specials. Episodes are numbers within the allowed seasons, e.g. <code>2-</code> skips the first episode of every season.</div>
+        <div id="rules" style="margin-top:1em"></div>
+
         <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
       </form>
     </div>
@@ -23,10 +36,11 @@
     (function () {
       var guid = '624d7a23-666e-43ed-a272-11e404940290';
       var page = document.querySelector('#JellycapConfigPage');
+      var rules = [];
       var fields = [
         ['RecapDirectory', 'Recap folder (empty = server data folder/jellycap)', 'text'],
         ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
-        ['RecapFormat', 'Recap format', 'select:Video|Text|Both'],
+        ['RecapFormat', 'Default recap format', 'select:Video|Text|Both'],
         ['TextLanguage', 'Text recap language', 'select:en|he|es|fr|de|it|pt|ru|ar'],
         ['TranslationUrl', 'Translation server URL (LibreTranslate compatible, empty = no translation)', 'text'],
         ['TranslationApiKey', 'Translation API key (optional)', 'text'],
@@ -45,7 +59,6 @@
       var box = page.querySelector('#fields');
       fields.forEach(function (f) {
         var d = document.createElement('div');
-        d.className = 'inputContainer';
         if (f[2].indexOf('select:') === 0) {
           d.className = 'selectContainer';
           d.innerHTML = '<label class="selectLabel" for="' + f[0] + '">' + f[1] + '</label>' +
@@ -53,26 +66,94 @@
             f[2].substring(7).split('|').map(function (o) { return '<option value="' + o + '">' + o + '</option>'; }).join('') +
             '</select>';
         } else {
+          d.className = 'inputContainer';
           d.innerHTML = '<label class="inputLabel inputLabelUnfocused" for="' + f[0] + '">' + f[1] + '</label>' +
             '<input id="' + f[0] + '" type="' + f[2] + '" is="emby-input" />';
         }
         box.appendChild(d);
       });
+
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function renderRules() {
+        var host = page.querySelector('#rules');
+        if (!rules.length) {
+          host.innerHTML = '<p><em>No show rules. All shows follow the settings above.</em></p>';
+          return;
+        }
+        host.innerHTML = rules.map(function (r, i) {
+          var opts = ['Default', 'Video', 'Text', 'Both'].map(function (o) {
+            return '<option value="' + o + '"' + (r.Format === o ? ' selected' : '') + '>' + (o === 'Default' ? 'Default format' : o) + '</option>';
+          }).join('');
+          return '<div class="paper-card" data-i="' + i + '" style="padding:.8em 1em;margin-bottom:.8em;border:1px solid rgba(128,128,128,.4);border-radius:6px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + esc(r.SeriesName) + '</strong>' +
+            '<button is="emby-button" type="button" class="raised" data-act="remove"><span>Remove</span></button></div>' +
+            '<div class="checkboxContainer"><label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-k="Enabled"' + (r.Enabled ? ' checked' : '') + ' /><span>Recap enabled for this show</span></label></div>' +
+            '<div class="selectContainer"><label class="selectLabel">Format</label><select is="emby-select" data-k="Format">' + opts + '</select></div>' +
+            '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Seasons (empty = all)</label><input type="text" is="emby-input" data-k="Seasons" value="' + esc(r.Seasons) + '" /></div>' +
+            '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Episodes (empty = all)</label><input type="text" is="emby-input" data-k="Episodes" value="' + esc(r.Episodes) + '" /></div>' +
+            '</div>';
+        }).join('');
+      }
+
+      page.querySelector('#rules').addEventListener('change', function (e) {
+        var card = e.target.closest('[data-i]');
+        var k = e.target.getAttribute('data-k');
+        if (!card || !k) { return; }
+        rules[+card.getAttribute('data-i')][k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+      });
+      page.querySelector('#rules').addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-act="remove"]');
+        var card = e.target.closest('[data-i]');
+        if (btn && card) {
+          rules.splice(+card.getAttribute('data-i'), 1);
+          renderRules();
+        }
+      });
+      page.querySelector('#addSeries').addEventListener('click', function () {
+        var sel = page.querySelector('#seriesPicker');
+        if (!sel.value) { return; }
+        var exists = rules.some(function (r) { return r.SeriesId === sel.value; });
+        if (!exists) {
+          rules.push({ SeriesId: sel.value, SeriesName: sel.options[sel.selectedIndex].text, Enabled: true, Format: 'Default', Seasons: '', Episodes: '' });
+          renderRules();
+        }
+      });
+
+      function loadSeries() {
+        return ApiClient.getItems(ApiClient.getCurrentUserId(), { IncludeItemTypes: 'Series', Recursive: true, SortBy: 'SortName', Fields: '' }).then(function (res) {
+          var sel = page.querySelector('#seriesPicker');
+          sel.innerHTML = (res.Items || []).map(function (s) {
+            return '<option value="' + esc(s.Id) + '">' + esc(s.Name) + '</option>';
+          }).join('');
+        });
+      }
+
       page.addEventListener('pageshow', function () {
         Dashboard.showLoadingMsg();
-        ApiClient.getPluginConfiguration(guid).then(function (c) {
+        loadSeries().catch(function () { }).then(function () {
+          return ApiClient.getPluginConfiguration(guid);
+        }).then(function (c) {
           page.querySelector('#Enabled').checked = c.Enabled;
           page.querySelector('#PreGenerateNext').checked = c.PreGenerateNext;
+          page.querySelector('#OnlyListedSeries').checked = c.OnlyListedSeries;
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
+          rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
+          renderRules();
           Dashboard.hideLoadingMsg();
         });
       });
+
       page.querySelector('#JellycapConfigForm').addEventListener('submit', function (e) {
         e.preventDefault();
         Dashboard.showLoadingMsg();
         ApiClient.getPluginConfiguration(guid).then(function (c) {
           c.Enabled = page.querySelector('#Enabled').checked;
           c.PreGenerateNext = page.querySelector('#PreGenerateNext').checked;
+          c.OnlyListedSeries = page.querySelector('#OnlyListedSeries').checked;
+          c.SeriesRules = rules;
           fields.forEach(function (f) {
             var v = page.querySelector('#' + f[0]).value;
             c[f[0]] = f[2] === 'number' ? parseInt(v, 10) : v;

@@ -58,17 +58,17 @@ public class RecapService
     }
 
     /// <summary>Text-only recaps have nothing to say about the watched part, so resume == new.</summary>
-    private static (RecapMode Mode, TimeSpan Pos) Normalize(RecapMode mode, TimeSpan pos)
-        => Plugin.Instance?.Configuration.RecapFormat == RecapFormat.Text ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
+    private static (RecapMode Mode, TimeSpan Pos) Normalize(RecapMode mode, TimeSpan pos, RecapFormat fmt)
+        => fmt == RecapFormat.Text ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
 
-    public string GetRecapPath(Episode ep, RecapMode mode, TimeSpan pos)
+    public string GetRecapPath(Episode ep, RecapMode mode, TimeSpan pos, RecapFormat fmt)
     {
-        (mode, pos) = Normalize(mode, pos);
+        (mode, pos) = Normalize(mode, pos, fmt);
         var cfg = Plugin.Instance!.Configuration;
         var series = Sanitize(ep.SeriesName ?? "Series");
         var code = $"S{ep.ParentIndexNumber ?? 0:00}E{ep.IndexNumber ?? 0:00}";
         var lang = Localization.Normalize(cfg.TextLanguage);
-        var format = cfg.RecapFormat switch
+        var format = fmt switch
         {
             RecapFormat.Text => $" [text-{lang}]",
             RecapFormat.Both => $" [both-{lang}]",
@@ -79,10 +79,10 @@ public class RecapService
     }
 
     /// <summary>Starts (or joins) generation. Result is the file path, or null if nothing to recap / failure.</summary>
-    public Task<string?> EnsureRecapFileAsync(Episode ep, RecapMode mode, TimeSpan pos)
+    public Task<string?> EnsureRecapFileAsync(Episode ep, RecapMode mode, TimeSpan pos, RecapFormat fmt)
     {
-        (mode, pos) = Normalize(mode, pos);
-        var path = GetRecapPath(ep, mode, pos);
+        (mode, pos) = Normalize(mode, pos, fmt);
+        var path = GetRecapPath(ep, mode, pos, fmt);
         if (File.Exists(path))
         {
             return Task.FromResult<string?>(path);
@@ -92,7 +92,7 @@ public class RecapService
         {
             try
             {
-                return await GenerateAsync(ep, mode, pos, p).ConfigureAwait(false);
+                return await GenerateAsync(ep, mode, pos, fmt, p).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -156,10 +156,10 @@ public class RecapService
         return removed;
     }
 
-    private async Task<string?> GenerateAsync(Episode ep, RecapMode mode, TimeSpan pos, string output)
+    private async Task<string?> GenerateAsync(Episode ep, RecapMode mode, TimeSpan pos, RecapFormat fmt, string output)
     {
         var cfg = Plugin.Instance!.Configuration;
-        var clips = await _planner.PlanAsync(ep, mode, pos, cfg, CancellationToken.None).ConfigureAwait(false);
+        var clips = await _planner.PlanAsync(ep, mode, pos, fmt, cfg,CancellationToken.None).ConfigureAwait(false);
         if (clips.Count == 0)
         {
             return null;
