@@ -1,0 +1,70 @@
+# Release a plugin by pushing a tag: <PluginFolder>-v<version>
+#   e.g. git tag Jellyfin.Plugin.Template-v1.0.0.0 && git push --tags
+# Builds plugins/<PluginFolder>, zips the DLL, creates a GitHub Release,
+# and adds the version to manifest.json on main (metadata from plugins/<PluginFolder>/meta.json).
+name: Release plugin
+
+on:
+  push:
+    tags:
+      - '*-v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Parse tag
+        id: tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "folder=${TAG%-v*}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG##*-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          dotnet publish "plugins/${{ steps.tag.outputs.folder }}" -c Release -o out \
+            -p:AssemblyVersion=${{ steps.tag.outputs.version }} \
+            -p:FileVersion=${{ steps.tag.outputs.version }}
+
+      - name: Zip
+        id: zip
+        run: |
+          F="${{ steps.tag.outputs.folder }}"
+          ZIP="${F}_${{ steps.tag.outputs.version }}.zip"
+          (cd out && zip -j "../$ZIP" "$F.dll")
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "${{ steps.zip.outputs.zip }}" --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Update manifest on main
+        run: |
+          F="${{ steps.tag.outputs.folder }}"
+          V="${{ steps.tag.outputs.version }}"
+          ZIP="${{ steps.zip.outputs.zip }}"
+          META="plugins/$F/meta.json"
+          URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${ZIP}"
+          cp "$ZIP" /tmp/
+          git fetch origin main
+          git checkout -f main
+          python3 scripts/add_version.py --zip "/tmp/$ZIP" --url "$URL" --version "$V" \
+            --guid "$(jq -r .guid $META)" --name "$(jq -r .name $META)" \
+            --description "$(jq -r .description $META)" --overview "$(jq -r .overview $META)" \
+            --owner "$(jq -r .owner $META)" --category "$(jq -r .category $META)" \
+            --abi "$(jq -r .targetAbi $META)" --changelog "$(jq -r .changelog $META)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "manifest: $F $V"
+          git push origin main

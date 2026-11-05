@@ -1,0 +1,10 @@
+{
+  "guid": "00ada1b1-b58d-4585-a56b-ca0b44b65077",
+  "name": "Template",
+  "description": "Template Jellyfin plugin.",
+  "overview": "Starter plugin. Copy folder, rename, change GUID.",
+  "owner": "xJellys",
+  "category": "General",
+  "targetAbi": "10.9.0.0",
+  "changelog": "Initial release"
+}
