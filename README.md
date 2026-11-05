@@ -4,7 +4,7 @@
 Jellyfin Dashboard → Plugins → Repositories → **+** and add:
 
 ```
-https://raw.githubusercontent.com/<USER>/xJellys/main/manifest.json
+https://raw.githubusercontent.com/de-Bat/xJellys/main/manifest.json
 ```
 
 Then Catalog → install plugin → restart Jellyfin.
@@ -15,9 +15,9 @@ Then Catalog → install plugin → restart Jellyfin.
 3. Register it:
    ```
    python scripts/add_version.py --zip Foo_1.0.0.0.zip \
-     --url https://github.com/<USER>/xJellys/releases/download/v1.0.0.0/Foo_1.0.0.0.zip \
+     --url https://github.com/de-Bat/xJellys/releases/download/v1.0.0.0/Foo_1.0.0.0.zip \
      --guid <PLUGIN-GUID> --version 1.0.0.0 --abi 10.9.0.0 \
-     --name "Foo" --description "..." --owner "<USER>"
+     --name "Foo" --description "..." --owner "de-Bat"
    ```
    (`--name` etc. only needed first time.)
 4. Commit + push `manifest.json`.
