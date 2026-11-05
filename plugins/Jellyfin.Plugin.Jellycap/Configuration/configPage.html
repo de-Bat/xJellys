@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Jellycap</title></head>
+<body>
+<div id="JellycapConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+  <div data-role="content">
+    <div class="content-primary">
+      <h2>Jellycap</h2>
+      <p>Plays a recap before episodes on Android TV. Add the recap folder below as a Jellyfin library (type: Movies or Home Videos, no metadata downloaders).</p>
+      <form id="JellycapConfigForm">
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="Enabled" type="checkbox" is="emby-checkbox" /><span>Enabled</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="PreGenerateNext" type="checkbox" is="emby-checkbox" /><span>Pre-build recap for next episode</span></label>
+        </div>
+        <div id="fields"></div>
+        <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
+      </form>
+    </div>
+  </div>
+  <script type="text/javascript">
+    (function () {
+      var guid = '624d7a23-666e-43ed-a272-11e404940290';
+      var page = document.querySelector('#JellycapConfigPage');
+      var fields = [
+        ['RecapDirectory', 'Recap folder (empty = server data folder/jellycap)', 'text'],
+        ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
+        ['PreviousEpisodes', 'Previous episodes to recap', 'number'],
+        ['PreviousClipSeconds', 'Seconds per previous episode', 'number'],
+        ['CreditsOffsetSeconds', 'Seconds of credits to skip at end of previous episodes', 'number'],
+        ['ThisEpisodeClips', 'Clips from watched part of resumed episode', 'number'],
+        ['ThisEpisodeClipSeconds', 'Seconds per watched-part clip', 'number'],
+        ['NewEpisodeMaxStartSeconds', 'Start before this position = new episode (s)', 'number'],
+        ['ResumeMinSeconds', 'Start after this position = resumed episode (s)', 'number'],
+        ['MaxWaitSeconds', 'Max seconds to wait for a recap to build', 'number'],
+        ['OutputHeight', 'Recap video height', 'number'],
+        ['RetentionDays', 'Delete recaps older than (days)', 'number']
+      ];
+      var box = page.querySelector('#fields');
+      fields.forEach(function (f) {
+        var d = document.createElement('div');
+        d.className = 'inputContainer';
+        d.innerHTML = '<label class="inputLabel inputLabelUnfocused" for="' + f[0] + '">' + f[1] + '</label>' +
+          '<input id="' + f[0] + '" type="' + f[2] + '" is="emby-input" />';
+        box.appendChild(d);
+      });
+      page.addEventListener('pageshow', function () {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          page.querySelector('#Enabled').checked = c.Enabled;
+          page.querySelector('#PreGenerateNext').checked = c.PreGenerateNext;
+          fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
+          Dashboard.hideLoadingMsg();
+        });
+      });
+      page.querySelector('#JellycapConfigForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          c.Enabled = page.querySelector('#Enabled').checked;
+          c.PreGenerateNext = page.querySelector('#PreGenerateNext').checked;
+          fields.forEach(function (f) {
+            var v = page.querySelector('#' + f[0]).value;
+            c[f[0]] = f[2] === 'number' ? parseInt(v, 10) : v;
+          });
+          ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+        });
+        return false;
+      });
+    })();
+  </script>
+</div>
+</body>
+</html>

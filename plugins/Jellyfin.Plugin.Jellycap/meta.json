@@ -1,0 +1,10 @@
+{
+  "guid": "624d7a23-666e-43ed-a272-11e404940290",
+  "name": "Jellycap",
+  "description": "Plays a short recap before an episode (Android TV friendly).",
+  "overview": "Builds a recap video from previous episodes (and from the already-watched part of a resumed episode) with ffmpeg, then tells the Android TV client to play it before the episode.",
+  "owner": "xJellys",
+  "category": "General",
+  "targetAbi": "10.9.0.0",
+  "changelog": "Initial release"
+}

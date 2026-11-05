@@ -33,3 +33,22 @@ git tag Jellyfin.Plugin.Template-v1.0.0.0
 git push --tags
 ```
 Tag format `<Folder>-v<version>`. Action builds, zips, creates Release, commits `manifest.json` to `main`.
+
+## Plugins
+
+### Jellycap (`plugins/Jellyfin.Plugin.Jellycap`)
+Plays a recap before an episode on **Android TV** (any remote-controllable client; filter in plugin settings).
+
+- **New episode** → recap = tail of the previous N episodes (credits skipped).
+- **Resumed episode** → previous-episode recap + clips spread over the part of this episode already watched, ending at the resume point.
+
+Android TV cannot show plugin UI, so Jellycap builds a real video with ffmpeg and tells the TV session to play it, then returns to the episode (at the resume position).
+
+Setup:
+1. Install from the repo catalog, restart Jellyfin.
+2. Add the recap folder (default `<jellyfin data>/jellycap`, change in plugin settings) as a library (Movies or Home Videos, disable metadata downloaders).
+3. Play an episode on Android TV. The recap for the *next* episode is pre-built, so it is instant when binging; the first episode waits up to `MaxWaitSeconds` for a build, else it just plays normally.
+
+Limits: the client starts the episode before the server can intercept, so the recap appears a moment after playback starts. Backing out of the recap (stop) does not auto-start the episode. Needs Jellyfin 10.9+ and episodes with a local file.
+
+Release: `git tag Jellyfin.Plugin.Jellycap-v1.0.0.0 && git push --tags`.
