@@ -25,5 +25,24 @@
         "timestamp": "2026-11-05T21:53:36Z"
       }
     ]
+  },
+  {
+    "guid": "8f3c1d52-4b7e-4a0e-9d1a-6c2e5b7a9f10",
+    "name": "JellyXR",
+    "description": "X-Ray style cast cards on pause (Android TV friendly).",
+    "overview": "Scans videos once with on-server face recognition to learn which cast members appear when. Pause on Android TV and JellyXR sends text cards with the actors on screen (this scene) or the whole episode cast.",
+    "owner": "xJellys",
+    "category": "General",
+    "imageUrl": "",
+    "versions": [
+      {
+        "version": "1.0.0.0",
+        "changelog": "Initial release",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyXR-v1.0.0.0/Jellyfin.Plugin.JellyXR_1.0.0.0.zip",
+        "checksum": "E87681545756CFE324B6EC1595C27D32",
+        "timestamp": "2026-11-05T22:30:51Z"
+      }
+    ]
   }
 ]
