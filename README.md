@@ -49,6 +49,12 @@ Setup:
 2. Add the recap folder (default `<jellyfin data>/jellycap`, change in plugin settings) as a library (Movies or Home Videos, disable metadata downloaders).
 3. Play an episode on Android TV. The recap for the *next* episode is pre-built, so it is instant when binging; the first episode waits up to `MaxWaitSeconds` for a build, else it just plays normally.
 
+Text recap (`Recap format` setting: `Video` | `Text` | `Both`):
+- **Text** = title cards ("Previously on …", then `S01E02 · Name` + episode summary from Jellyfin metadata) rendered by ffmpeg/libass, so right-to-left scripts (Hebrew, Arabic) shape correctly. Reading time scales with text length. A resumed episode gets the same cards as a new one (a spoiler-free recap of the watched part needs video).
+- **Both** = a card before each video clip.
+- **Translation**: card labels are localized (`en he es fr de it pt ru ar`). Summaries are shown in the language stored in Jellyfin; set a *Translation server URL* (LibreTranslate compatible `POST /translate`) to machine-translate them to the chosen language. Translations are cached on disk; if the server is down the original text is used.
+- **Fonts**: libass uses the server's fonts. Set *Text card font* to one that covers your language (e.g. `DejaVu Sans` on Linux for Hebrew; Windows `Arial` works).
+
 Limits: the client starts the episode before the server can intercept, so the recap appears a moment after playback starts. Backing out of the recap (stop) does not auto-start the episode. Needs Jellyfin 10.9+ and episodes with a local file.
 
 Release: `git tag Jellyfin.Plugin.Jellycap-v1.0.0.0 && git push --tags`.

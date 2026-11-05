@@ -12,6 +12,20 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Comma separated, case-insensitive substrings matched against client and device name. Empty = every remote-controllable client.</summary>
     public string ClientFilter { get; set; } = "Android TV";
 
+    /// <summary>Video clips, text cards, or both.</summary>
+    public RecapFormat RecapFormat { get; set; } = RecapFormat.Video;
+
+    /// <summary>Language of text card labels (en, he, es, fr, de, it, pt, ru, ar) and translation target.</summary>
+    public string TextLanguage { get; set; } = "en";
+
+    /// <summary>Optional LibreTranslate compatible base URL, e.g. http://localhost:5000. Empty = show summaries as stored in Jellyfin.</summary>
+    public string TranslationUrl { get; set; } = string.Empty;
+
+    public string TranslationApiKey { get; set; } = string.Empty;
+
+    /// <summary>Font for text cards. Must exist on the server and cover the language (e.g. "DejaVu Sans" for Hebrew on Linux). Empty = Arial.</summary>
+    public string FontName { get; set; } = string.Empty;
+
     public int PreviousEpisodes { get; set; } = 2;
 
     public int PreviousClipSeconds { get; set; } = 30;

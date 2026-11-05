@@ -2,7 +2,7 @@
 <html>
 <head><meta charset="utf-8"><title>Jellycap</title></head>
 <body>
-<div id="JellycapConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+<div id="JellycapConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
   <div data-role="content">
     <div class="content-primary">
       <h2>Jellycap</h2>
@@ -26,6 +26,11 @@
       var fields = [
         ['RecapDirectory', 'Recap folder (empty = server data folder/jellycap)', 'text'],
         ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
+        ['RecapFormat', 'Recap format', 'select:Video|Text|Both'],
+        ['TextLanguage', 'Text recap language', 'select:en|he|es|fr|de|it|pt|ru|ar'],
+        ['TranslationUrl', 'Translation server URL (LibreTranslate compatible, empty = no translation)', 'text'],
+        ['TranslationApiKey', 'Translation API key (optional)', 'text'],
+        ['FontName', 'Text card font (empty = Arial; Hebrew/Arabic need a font that has the glyphs)', 'text'],
         ['PreviousEpisodes', 'Previous episodes to recap', 'number'],
         ['PreviousClipSeconds', 'Seconds per previous episode', 'number'],
         ['CreditsOffsetSeconds', 'Seconds of credits to skip at end of previous episodes', 'number'],
@@ -41,8 +46,16 @@
       fields.forEach(function (f) {
         var d = document.createElement('div');
         d.className = 'inputContainer';
-        d.innerHTML = '<label class="inputLabel inputLabelUnfocused" for="' + f[0] + '">' + f[1] + '</label>' +
-          '<input id="' + f[0] + '" type="' + f[2] + '" is="emby-input" />';
+        if (f[2].indexOf('select:') === 0) {
+          d.className = 'selectContainer';
+          d.innerHTML = '<label class="selectLabel" for="' + f[0] + '">' + f[1] + '</label>' +
+            '<select id="' + f[0] + '" is="emby-select">' +
+            f[2].substring(7).split('|').map(function (o) { return '<option value="' + o + '">' + o + '</option>'; }).join('') +
+            '</select>';
+        } else {
+          d.innerHTML = '<label class="inputLabel inputLabelUnfocused" for="' + f[0] + '">' + f[1] + '</label>' +
+            '<input id="' + f[0] + '" type="' + f[2] + '" is="emby-input" />';
+        }
         box.appendChild(d);
       });
       page.addEventListener('pageshow', function () {

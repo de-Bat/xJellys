@@ -57,17 +57,31 @@ public class RecapService
         return Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Text-only recaps have nothing to say about the watched part, so resume == new.</summary>
+    private static (RecapMode Mode, TimeSpan Pos) Normalize(RecapMode mode, TimeSpan pos)
+        => Plugin.Instance?.Configuration.RecapFormat == RecapFormat.Text ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
+
     public string GetRecapPath(Episode ep, RecapMode mode, TimeSpan pos)
     {
+        (mode, pos) = Normalize(mode, pos);
+        var cfg = Plugin.Instance!.Configuration;
         var series = Sanitize(ep.SeriesName ?? "Series");
         var code = $"S{ep.ParentIndexNumber ?? 0:00}E{ep.IndexNumber ?? 0:00}";
+        var lang = Localization.Normalize(cfg.TextLanguage);
+        var format = cfg.RecapFormat switch
+        {
+            RecapFormat.Text => $" [text-{lang}]",
+            RecapFormat.Both => $" [both-{lang}]",
+            _ => string.Empty
+        };
         var suffix = mode == RecapMode.Resume ? $" (resume m{(int)pos.TotalMinutes})" : string.Empty;
-        return Path.Combine(RecapDirectory, series, $"{series} - {code} - Recap{suffix}.mp4");
+        return Path.Combine(RecapDirectory, series, $"{series} - {code} - Recap{format}{suffix}.mp4");
     }
 
     /// <summary>Starts (or joins) generation. Result is the file path, or null if nothing to recap / failure.</summary>
     public Task<string?> EnsureRecapFileAsync(Episode ep, RecapMode mode, TimeSpan pos)
     {
+        (mode, pos) = Normalize(mode, pos);
         var path = GetRecapPath(ep, mode, pos);
         if (File.Exists(path))
         {
@@ -145,7 +159,7 @@ public class RecapService
     private async Task<string?> GenerateAsync(Episode ep, RecapMode mode, TimeSpan pos, string output)
     {
         var cfg = Plugin.Instance!.Configuration;
-        var clips = _planner.Plan(ep, mode, pos, cfg);
+        var clips = await _planner.PlanAsync(ep, mode, pos, cfg, CancellationToken.None).ConfigureAwait(false);
         if (clips.Count == 0)
         {
             return null;
@@ -162,7 +176,7 @@ public class RecapService
             }
 
             _logger.LogInformation("Building recap {Output} from {Count} clips", output, clips.Count);
-            var ok = await _builder.BuildAsync(clips, cfg.OutputHeight, tmp, CancellationToken.None).ConfigureAwait(false);
+            var ok = await _builder.BuildAsync(clips, cfg.OutputHeight, cfg.FontName, tmp,CancellationToken.None).ConfigureAwait(false);
             if (!ok)
             {
                 if (File.Exists(tmp))

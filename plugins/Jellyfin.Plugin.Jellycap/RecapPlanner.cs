@@ -7,14 +7,16 @@ using MediaBrowser.Model.Querying;
 
 namespace Jellyfin.Plugin.Jellycap;
 
-/// <summary>Decides which clips make up a recap.</summary>
+/// <summary>Decides which clips and text cards make up a recap.</summary>
 public class RecapPlanner
 {
     private readonly ILibraryManager _libraryManager;
+    private readonly TextCardFactory _cards;
 
-    public RecapPlanner(ILibraryManager libraryManager)
+    public RecapPlanner(ILibraryManager libraryManager, TextCardFactory cards)
     {
         _libraryManager = libraryManager;
+        _cards = cards;
     }
 
     public IReadOnlyList<Episode> GetSeriesEpisodes(Episode episode)
@@ -47,9 +49,12 @@ public class RecapPlanner
         return idx >= 0 && idx + 1 < all.Count ? all[idx + 1] : null;
     }
 
-    public IReadOnlyList<ClipSpec> Plan(Episode episode, RecapMode mode, TimeSpan resumePosition, PluginConfiguration cfg)
+    public async Task<IReadOnlyList<RecapSegment>> PlanAsync(Episode episode, RecapMode mode, TimeSpan resumePosition, PluginConfiguration cfg, CancellationToken ct)
     {
-        var clips = new List<ClipSpec>();
+        var segments = new List<RecapSegment>();
+        var fmt = cfg.RecapFormat;
+        var withText = fmt != RecapFormat.Video;
+        var withVideo = fmt != RecapFormat.Text;
         var all = GetSeriesEpisodes(episode);
         var idx = IndexOf(all, episode);
 
@@ -58,25 +63,53 @@ public class RecapPlanner
             var isSpecial = (episode.ParentIndexNumber ?? 1) == 0;
             var previous = all.Take(idx)
                 .Where(e => isSpecial || (e.ParentIndexNumber ?? 1) > 0)
-                .Where(e => !string.IsNullOrEmpty(e.Path) && File.Exists(e.Path))
-                .TakeLast(cfg.PreviousEpisodes);
+                .Where(e => !withVideo || (!string.IsNullOrEmpty(e.Path) && File.Exists(e.Path)))
+                .TakeLast(cfg.PreviousEpisodes)
+                .ToList();
+
+            if (withText && previous.Count > 0)
+            {
+                segments.Add(new TextCardSpec(Localization.Previously(cfg.TextLanguage, episode.SeriesName), null, 3));
+            }
 
             foreach (var prev in previous)
             {
-                var clip = TailClip(prev, cfg);
-                if (clip is not null)
+                if (withText)
                 {
-                    clips.Add(clip);
+                    var card = await _cards.BuildAsync(prev, cfg, ct).ConfigureAwait(false);
+                    if (card is not null)
+                    {
+                        segments.Add(card);
+                    }
+                }
+
+                if (withVideo)
+                {
+                    var clip = TailClip(prev, cfg);
+                    if (clip is not null)
+                    {
+                        segments.Add(clip);
+                    }
                 }
             }
         }
 
-        if (mode == RecapMode.Resume && !string.IsNullOrEmpty(episode.Path) && File.Exists(episode.Path))
+        if (mode == RecapMode.Resume && withVideo && !string.IsNullOrEmpty(episode.Path) && File.Exists(episode.Path))
         {
-            clips.AddRange(WatchedPartClips(episode.Path, resumePosition, cfg));
+            var watched = WatchedPartClips(episode.Path, resumePosition, cfg).ToList();
+            if (watched.Count > 0)
+            {
+                if (withText)
+                {
+                    segments.Add(new TextCardSpec(Localization.EarlierInEpisode(cfg.TextLanguage), null, 2.5));
+                }
+
+                segments.AddRange(watched);
+            }
         }
 
-        return clips;
+        // a lone heading card is not a recap
+        return segments.Any(s => s is ClipSpec || s is TextCardSpec { Body: not null }) ? segments : Array.Empty<RecapSegment>();
     }
 
     private static int IndexOf(IReadOnlyList<Episode> all, Episode episode)
