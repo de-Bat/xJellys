@@ -36,6 +36,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.1.2.0",
+        "changelog": "1.1.2.0: Detailed logging (pauses, cards shown, data source used, scans, model load; Debug level explains why nothing was shown).",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyXR-v1.1.2.0/Jellyfin.Plugin.JellyXR_1.1.2.0.zip",
+        "checksum": "33F942B9E8A2373054F9E1AEED1C68ED",
+        "timestamp": "2026-11-07T20:12:29Z"
+      },
+      {
         "version": "1.1.1.0",
         "changelog": "1.1.1.0: Test Xrayarr connection button on the settings page (checks URL and API key before saving).",
         "targetAbi": "10.9.0.0",
