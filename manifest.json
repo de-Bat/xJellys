@@ -36,6 +36,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.1.0.0",
+        "changelog": "1.1.0.0: Xrayarr integration (scene data from an Xrayarr server, as the only source or as primary/fallback to the local face scan).",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyXR-v1.1.0.0/Jellyfin.Plugin.JellyXR_1.1.0.0.zip",
+        "checksum": "0C1A586E1C77A6E1AB14D65055EB1E39",
+        "timestamp": "2026-11-07T10:11:10Z"
+      },
+      {
         "version": "1.0.0.0",
         "changelog": "Initial release",
         "targetAbi": "10.9.0.0",
