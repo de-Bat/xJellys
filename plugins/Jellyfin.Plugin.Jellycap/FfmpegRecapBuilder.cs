@@ -122,6 +122,7 @@ public class FfmpegRecapBuilder
                 psi.ArgumentList.Add(a);
             }
 
+            _logger.LogDebug("Running {Ffmpeg} {Args}", psi.FileName, string.Join(' ', psi.ArgumentList.Select(a => a.Contains(' ', StringComparison.Ordinal) ? "\"" + a + "\"" : a)));
             using var proc = new Process { StartInfo = psi };
             proc.Start();
             var stderr = proc.StandardError.ReadToEndAsync(ct);
@@ -135,6 +136,11 @@ public class FfmpegRecapBuilder
             }
             catch (OperationCanceledException)
             {
+                if (!ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning("ffmpeg recap timed out after 5 minutes; killing it ({Output})", output);
+                }
+
                 try
                 {
                     proc.Kill(true);
@@ -160,8 +166,9 @@ public class FfmpegRecapBuilder
             {
                 Directory.Delete(work, true);
             }
-            catch (IOException)
+            catch (IOException ex)
             {
+                _logger.LogDebug(ex, "Could not delete ffmpeg work folder {Dir}", work);
             }
         }
     }

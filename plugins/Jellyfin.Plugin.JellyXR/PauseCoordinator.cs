@@ -34,6 +34,8 @@ public sealed class PauseCoordinator : IHostedService
         _sessions.PlaybackStart += OnStart;
         _sessions.PlaybackProgress += OnProgress;
         _sessions.PlaybackStopped += OnStopped;
+        var cfg = Plugin.Instance?.Configuration;
+        _logger.LogInformation("JellyXR started (enabled: {Enabled}, data source: {Source})", cfg?.Enabled, cfg?.DataSource);
         return Task.CompletedTask;
     }
 
@@ -57,6 +59,8 @@ public sealed class PauseCoordinator : IHostedService
         {
             return;
         }
+
+        _logger.LogDebug("Playback started: {Item} on {Device} ({Client})", e.Item.Name, e.Session?.DeviceName, e.Session?.Client);
 
         // warm the Xrayarr cache so the first pause needs no network round trip
         if (cfg.DataSource != DataSource.Local && XrayarrClient.Configured(cfg))
@@ -111,18 +115,38 @@ public sealed class PauseCoordinator : IHostedService
     {
         var cfg = Plugin.Instance?.Configuration;
         var session = e.Session;
-        if (cfg is null || !cfg.Enabled || session is null || e.Item is null
-            || !session.SupportsRemoteControl || !ClientMatches(cfg.ClientFilter, session, e))
+        if (cfg is null || !cfg.Enabled || session is null || e.Item is null)
         {
             return;
         }
 
+        if (!session.SupportsRemoteControl)
+        {
+            _logger.LogDebug("No cards for {Item}: client {Client} on {Device} does not support remote control", e.Item.Name, session.Client, session.DeviceName);
+            return;
+        }
+
+        if (!ClientMatches(cfg.ClientFilter, session, e))
+        {
+            _logger.LogDebug("No cards for {Item}: client {Client} on {Device} does not match filter '{Filter}'", e.Item.Name, session.Client, session.DeviceName, cfg.ClientFilter);
+            return;
+        }
+
+        var pos = TimeSpan.FromTicks(e.PlaybackPositionTicks ?? 0);
         var set = await _cards.BuildAsync(e.Item, e.PlaybackPositionTicks ?? 0, cfg, CancellationToken.None).ConfigureAwait(false);
         if (set is null || set.Value.Cards.Count == 0)
         {
+            _logger.LogDebug("No cards for {Item} at {Pos}: nobody to show", e.Item.Name, pos);
             return;
         }
 
+        _logger.LogInformation(
+            "Paused {Item} at {Pos} on {Device}: showing {Count} card(s) ({Header})",
+            e.Item.Name,
+            pos,
+            session.DeviceName,
+            set.Value.Cards.Count,
+            set.Value.Header);
         var timeout = Math.Max(2, cfg.CardSeconds) * 1000;
         if (cfg.CardMode == CardMode.Combined)
         {
@@ -136,6 +160,7 @@ public sealed class PauseCoordinator : IHostedService
             // stop if the user resumed in the meantime
             if (!_paused.TryGetValue(session.Id, out var still) || !still)
             {
+                _logger.LogDebug("Playback resumed on {Device}; stopping cards", session.DeviceName);
                 return;
             }
 

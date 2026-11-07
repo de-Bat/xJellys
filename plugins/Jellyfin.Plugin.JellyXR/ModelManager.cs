@@ -64,6 +64,7 @@ public sealed class ModelManager
             }
 
             File.Delete(zipPath);
+            _logger.LogInformation("JellyXR face models ready in {Dir}", ModelDir);
         }
         finally
         {

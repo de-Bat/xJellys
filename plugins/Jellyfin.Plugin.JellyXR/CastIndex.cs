@@ -59,21 +59,23 @@ public sealed class CastIndex
         {
             person = _library.GetPerson(name);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogDebug(ex, "Person lookup failed for {Name}", name);
             return null;
         }
 
         var path = person?.GetImagePath(ImageType.Primary, 0);
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
+            _logger.LogDebug("No portrait for {Name}", name);
             return null;
         }
 
         var stamp = path + "|" + File.GetLastWriteTimeUtc(path).Ticks;
         lock (_gate)
         {
-            _cache ??= LoadCache();
+            _cache ??= LoadCache(_logger);
             if (_cache.TryGetValue(name, out var hit) && hit.Stamp == stamp)
             {
                 return hit.Emb;
@@ -96,6 +98,10 @@ public sealed class CastIndex
         {
             _logger.LogDebug("No usable portrait face for {Name}", name);
         }
+        else
+        {
+            _logger.LogDebug("Computed reference face for {Name}", name);
+        }
 
         lock (_gate)
         {
@@ -113,7 +119,7 @@ public sealed class CastIndex
         return emb;
     }
 
-    private static Dictionary<string, Entry> LoadCache()
+    private static Dictionary<string, Entry> LoadCache(ILogger logger)
     {
         try
         {
@@ -123,9 +129,9 @@ public sealed class CastIndex
                     ?? new Dictionary<string, Entry>();
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // corrupt cache: rebuild
+            logger.LogWarning(ex, "Cast face cache {File} unreadable; rebuilding", CacheFile);
         }
 
         return new Dictionary<string, Entry>();

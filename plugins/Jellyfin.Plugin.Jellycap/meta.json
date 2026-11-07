@@ -6,5 +6,5 @@
   "owner": "xJellys",
   "category": "General",
   "targetAbi": "10.9.0.0",
-  "changelog": "Text recap cards (localized, optional translation), per-show rules, auto pre-build on playback stop"
+  "changelog": "1.0.2.0: Detailed logging (recaps played, built, skipped and why; ffmpeg timeouts; cleanup results). Set Jellyfin.Plugin to Debug in logging.json for skip reasons."
 }

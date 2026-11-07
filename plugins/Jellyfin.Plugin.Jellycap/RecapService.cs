@@ -85,6 +85,7 @@ public class RecapService
         var path = GetRecapPath(ep, mode, pos, fmt);
         if (File.Exists(path))
         {
+            _logger.LogDebug("Recap already built: {Path}", path);
             return Task.FromResult<string?>(path);
         }
 
@@ -92,6 +93,7 @@ public class RecapService
         {
             try
             {
+                _logger.LogDebug("Recap generation queued: {Path}", p);
                 return await GenerateAsync(ep, mode, pos, fmt, p).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -127,6 +129,7 @@ public class RecapService
 
             if (DateTime.UtcNow >= deadline)
             {
+                _logger.LogDebug("Library did not pick up {Path} within {Timeout}", path, timeout);
                 return null;
             }
 
@@ -149,10 +152,12 @@ public class RecapService
             if (File.GetLastWriteTimeUtc(f) < cutoff)
             {
                 File.Delete(f);
+                _logger.LogDebug("Deleted old recap {File}", f);
                 removed++;
             }
         }
 
+        _logger.LogInformation("Recap cleanup: removed {Count} recap(s) older than {Days} days from {Dir}", removed, Math.Max(1, retentionDays), dir);
         return removed;
     }
 
@@ -162,8 +167,15 @@ public class RecapService
         var clips = await _planner.PlanAsync(ep, mode, pos, fmt, cfg,CancellationToken.None).ConfigureAwait(false);
         if (clips.Count == 0)
         {
+            _logger.LogInformation("Nothing to recap for {Series} {Episode} ({Mode}, {Format}): no earlier episodes, clips or summaries", ep.SeriesName, ep.Name, mode, fmt);
             return null;
         }
+
+        _logger.LogDebug(
+            "Recap plan for {Episode}: {Clips} clip(s), {Cards} text card(s)",
+            ep.Name,
+            clips.Count(s => s is ClipSpec),
+            clips.Count(s => s is TextCardSpec));
 
         Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         var tmp = output + ".tmp";
@@ -175,10 +187,12 @@ public class RecapService
                 return output;
             }
 
-            _logger.LogInformation("Building recap {Output} from {Count} clips", output, clips.Count);
+            _logger.LogInformation("Building recap {Output} from {Count} segments", output, clips.Count);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var ok = await _builder.BuildAsync(clips, cfg.OutputHeight, cfg.FontName, tmp,CancellationToken.None).ConfigureAwait(false);
             if (!ok)
             {
+                _logger.LogWarning("Recap build failed for {Output}", output);
                 if (File.Exists(tmp))
                 {
                     File.Delete(tmp);
@@ -188,6 +202,7 @@ public class RecapService
             }
 
             File.Move(tmp, output, true);
+            _logger.LogInformation("Recap built in {Seconds:0.0}s: {Output}", sw.Elapsed.TotalSeconds, output);
             return output;
         }
         finally

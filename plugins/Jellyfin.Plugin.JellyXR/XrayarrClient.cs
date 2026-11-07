@@ -128,9 +128,15 @@ public sealed class XrayarrClient
                 var (found, tl) = await FetchAsync(cfg, query, ct).ConfigureAwait(false);
                 if (found)
                 {
+                    _logger.LogDebug("Xrayarr matched {Item} by {Query}: {State}", item.Name, query, tl is null ? "not ready" : tl.Segments.Count + " segments");
                     result = tl;
                     break;
                 }
+            }
+
+            if (result is null)
+            {
+                _logger.LogDebug("No ready Xrayarr timeline for {Item}", item.Name);
             }
 
             _cache[item.Id] = (DateTime.UtcNow + (result is null ? MissTtl : ReadyTtl), result);

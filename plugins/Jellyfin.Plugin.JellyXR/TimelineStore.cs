@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyXR;
 
@@ -22,6 +23,13 @@ public sealed class TimelineStore
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
+    private readonly ILogger<TimelineStore> _logger;
+
+    public TimelineStore(ILogger<TimelineStore> logger)
+    {
+        _logger = logger;
+    }
+
     private static string Dir => Path.Combine(Plugin.Instance!.DataDirectory, "timelines");
 
     private static string PathFor(Guid itemId) => Path.Combine(Dir, itemId.ToString("N") + ".json");
@@ -35,8 +43,9 @@ public sealed class TimelineStore
             var p = PathFor(itemId);
             return File.Exists(p) ? JsonSerializer.Deserialize<Timeline>(File.ReadAllText(p), Json) : null;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Face timeline for item {Id} unreadable", itemId);
             return null;
         }
     }

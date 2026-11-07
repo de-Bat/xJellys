@@ -1,6 +1,7 @@
 using Jellyfin.Plugin.JellyXR.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyXR;
 
@@ -14,12 +15,14 @@ public sealed class CardService
     private readonly FaceScanner _scanner;
     private readonly TimelineStore _store;
     private readonly XrayarrClient _xrayarr;
+    private readonly ILogger<CardService> _logger;
 
-    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr)
+    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr, ILogger<CardService> logger)
     {
         _scanner = scanner;
         _store = store;
         _xrayarr = xrayarr;
+        _logger = logger;
     }
 
     /// <summary>Scene data sources in the order they are tried.</summary>
@@ -50,6 +53,7 @@ public sealed class CardService
         var scope = ScopeFor(item, cfg);
         if (scope == CastScope.Off)
         {
+            _logger.LogDebug("Cards off for {Item} (scope Off)", item.Name);
             return null;
         }
 
@@ -79,6 +83,7 @@ public sealed class CardService
                     var tl = _store.Load(item.Id);
                     if (tl is { Entries.Count: > 0 })
                     {
+                        _logger.LogDebug("Scene data for {Item} from local face scan", item.Name);
                         return TimelineStore.PeopleBetween(tl, sec - cfg.SceneBackSeconds, sec + cfg.SceneForwardSeconds)
                             .Select(n => ToCard(n, null, false)).OfType<Card>().ToList();
                     }
@@ -88,6 +93,7 @@ public sealed class CardService
                     var xr = await _xrayarr.GetAsync(item, ct).ConfigureAwait(false);
                     if (xr is { Segments.Count: > 0 })
                     {
+                        _logger.LogDebug("Scene data for {Item} from Xrayarr", item.Name);
                         var ms = (long)TimeSpan.FromTicks(positionTicks).TotalMilliseconds;
                         return xr.PeopleAround(ms, ms - (cfg.SceneBackSeconds * 1000L), ms + (cfg.SceneForwardSeconds * 1000L))
                             .Select(p => ToCard(p.Name, p.Character, true)).OfType<Card>().ToList();
@@ -95,6 +101,7 @@ public sealed class CardService
                 }
             }
 
+            _logger.LogDebug("No scene data for {Item} (sources: {Sources})", item.Name, string.Join(", ", SourcesFor(cfg)));
             return new List<Card>();
         }
 

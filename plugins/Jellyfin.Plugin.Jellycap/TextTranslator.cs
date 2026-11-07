@@ -40,6 +40,7 @@ public class TextTranslator
         {
             if (Cache().TryGetValue(key, out var hit))
             {
+                _logger.LogDebug("Translation cache hit ({Target})", target);
                 return hit;
             }
         }
@@ -67,8 +68,11 @@ public class TextTranslator
             var translated = doc.RootElement.GetProperty("translatedText").GetString();
             if (string.IsNullOrWhiteSpace(translated))
             {
+                _logger.LogWarning("Translation service at {Url} returned empty text; using original", url);
                 return text;
             }
+
+            _logger.LogDebug("Translated {Chars} chars to {Target}", text.Length, target);
 
             lock (_lock)
             {
@@ -100,6 +104,7 @@ public class TextTranslator
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {
+            _logger.LogWarning(ex, "Translation cache {File} unreadable; starting empty", _cacheFile);
             _cache = new();
         }
 

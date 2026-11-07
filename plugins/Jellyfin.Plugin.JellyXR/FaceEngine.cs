@@ -1,6 +1,8 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
+using Microsoft.Extensions.Logging;
+
 namespace Jellyfin.Plugin.JellyXR;
 
 public readonly record struct DetectedFace(float X1, float Y1, float X2, float Y2, float Score, float[] Landmarks)
@@ -23,13 +25,15 @@ public sealed class FaceEngine : IDisposable
     };
 
     private readonly ModelManager _models;
+    private readonly ILogger<FaceEngine> _logger;
     private readonly SemaphoreSlim _init = new(1, 1);
     private InferenceSession? _det;
     private InferenceSession? _rec;
 
-    public FaceEngine(ModelManager models)
+    public FaceEngine(ModelManager models, ILogger<FaceEngine> logger)
     {
         _models = models;
+        _logger = logger;
     }
 
     public async Task EnsureLoadedAsync(CancellationToken ct)
@@ -51,6 +55,7 @@ public sealed class FaceEngine : IDisposable
             var opts = new SessionOptions { GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL, IntraOpNumThreads = 2 };
             _det = new InferenceSession(_models.DetectorPath, opts);
             _rec = new InferenceSession(_models.RecognizerPath, opts);
+            _logger.LogInformation("JellyXR face models loaded");
         }
         finally
         {

@@ -33,6 +33,7 @@ public sealed class RecapCoordinator : IHostedService
     {
         _sessions.PlaybackStart += OnPlaybackStart;
         _sessions.PlaybackStopped += OnPlaybackStopped;
+        _logger.LogInformation("Jellycap started (enabled: {Enabled}, recap folder: {Dir})", Plugin.Instance?.Configuration.Enabled, _recaps.RecapDirectory);
         return Task.CompletedTask;
     }
 
@@ -82,19 +83,34 @@ public sealed class RecapCoordinator : IHostedService
         }
 
         var session = e.Session;
-        if (session is null || !session.SupportsRemoteControl || !ClientMatches(cfg.ClientFilter, session, e))
+        if (session is null)
         {
+            _logger.LogDebug("No recap for {Episode}: playback has no session", episode.Name);
+            return;
+        }
+
+        if (!session.SupportsRemoteControl)
+        {
+            _logger.LogDebug("No recap for {Episode}: client {Client} on {Device} does not support remote control", episode.Name, session.Client, session.DeviceName);
+            return;
+        }
+
+        if (!ClientMatches(cfg.ClientFilter, session, e))
+        {
+            _logger.LogDebug("No recap for {Episode}: client {Client} on {Device} does not match filter '{Filter}'", episode.Name, session.Client, session.DeviceName, cfg.ClientFilter);
             return;
         }
 
         if (_skip.TryRemove((session.Id, episode.Id), out _))
         {
+            _logger.LogDebug("Episode {Episode} started after its recap; not recapping again", episode.Name);
             return; // this start is us returning to the episode after the recap
         }
 
         var decision = RecapRules.Decide(episode.SeriesId, episode.ParentIndexNumber, episode.IndexNumber, cfg);
         if (!decision.Allowed)
         {
+            _logger.LogDebug("No recap for {Series} {Episode}: excluded by series rules", episode.SeriesName, episode.Name);
             return;
         }
 
@@ -126,9 +142,16 @@ public sealed class RecapCoordinator : IHostedService
         }
         else
         {
+            _logger.LogDebug(
+                "No recap for {Episode}: start position {Pos} is past the new-episode window ({New}s) but before the resume threshold ({Resume}s)",
+                episode.Name,
+                pos,
+                cfg.NewEpisodeMaxStartSeconds,
+                cfg.ResumeMinSeconds);
             return;
         }
 
+        _logger.LogDebug("Recap wanted for {Episode}: mode {Mode}, format {Format}, position {Pos}", episode.Name, mode, fmt, pos);
         var wait = TimeSpan.FromSeconds(Math.Max(5, cfg.MaxWaitSeconds));
         var started = DateTime.UtcNow;
         var fileTask = _recaps.EnsureRecapFileAsync(episode, mode, pos, fmt);
@@ -141,6 +164,7 @@ public sealed class RecapCoordinator : IHostedService
         var file = await fileTask.ConfigureAwait(false);
         if (file is null)
         {
+            _logger.LogInformation("No recap for {Episode}: nothing to recap or generation failed", episode.Name);
             return;
         }
 
@@ -153,6 +177,7 @@ public sealed class RecapCoordinator : IHostedService
         }
 
         _pending[session.Id] = new Pending(item.Id, episode.Id, startTicks);
+        _logger.LogInformation("Playing {Mode} recap for {Episode} on {Device} ({Client})", mode, episode.Name, session.DeviceName, session.Client);
         await _sessions.SendPlayCommand(
             null,
             session.Id,
@@ -180,9 +205,11 @@ public sealed class RecapCoordinator : IHostedService
         var finished = e.PlayedToCompletion || (runtime > 0 && (e.PlaybackPositionTicks ?? 0) >= runtime * 0.9);
         if (!finished)
         {
+            _logger.LogInformation("Recap stopped early on {Device}; not starting the episode", session.DeviceName);
             return; // user backed out of the recap: do not force the episode
         }
 
+        _logger.LogInformation("Recap finished on {Device}; starting the episode at {Pos}", session.DeviceName, TimeSpan.FromTicks(pending.StartTicks));
         _skip[(session.Id, pending.EpisodeId)] = 0;
         await _sessions.SendPlayCommand(
             null,

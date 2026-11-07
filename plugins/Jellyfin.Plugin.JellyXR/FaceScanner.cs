@@ -59,10 +59,17 @@ public sealed class FaceScanner
         switch (Plugin.Instance!.Configuration.DataSource)
         {
             case DataSource.Xrayarr:
+                _logger.LogDebug("No local scan for {Item}: data source is Xrayarr only", item.Name);
                 return false;
             case DataSource.XrayarrThenLocal:
                 var xr = await _xrayarr.GetAsync(item, ct).ConfigureAwait(false);
-                return xr is not { Segments.Count: > 0 };
+                if (xr is { Segments.Count: > 0 })
+                {
+                    _logger.LogDebug("No local scan for {Item}: Xrayarr already has it", item.Name);
+                    return false;
+                }
+
+                return true;
             default:
                 return true;
         }
@@ -114,8 +121,14 @@ public sealed class FaceScanner
         await _one.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_store.Exists(item.Id) || !File.Exists(item.Path))
+            if (_store.Exists(item.Id))
             {
+                return false;
+            }
+
+            if (!File.Exists(item.Path))
+            {
+                _logger.LogWarning("Cannot scan {Item}: file not found at {Path}", item.Name, item.Path);
                 return false;
             }
 
@@ -123,6 +136,7 @@ public sealed class FaceScanner
             var names = CastNames(item);
             if (names.Count == 0)
             {
+                _logger.LogInformation("No cast metadata for {Item}; nothing to scan", item.Name);
                 _store.Save(item.Id, new Timeline { Interval = cfg.ScanIntervalSeconds });
                 return false;
             }
@@ -139,6 +153,7 @@ public sealed class FaceScanner
             }
 
             _logger.LogInformation("JellyXR scanning {Item} ({Count} cast with portraits)", item.Name, refs.Count);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var totalFrames = item.RunTimeTicks is > 0 ? (int)(TimeSpan.FromTicks(item.RunTimeTicks.Value).TotalSeconds / interval) : 0;
             var frame = 0;
             await foreach (var rgb in FrameReader.ReadVideoAsync(_encoder.EncoderPath, item.Path, interval, ct).ConfigureAwait(false))
@@ -167,7 +182,12 @@ public sealed class FaceScanner
             }
 
             _store.Save(item.Id, timeline);
-            _logger.LogInformation("JellyXR scan done for {Item}: {N} samples with known faces", item.Name, timeline.Entries.Count);
+            _logger.LogInformation(
+                "JellyXR scan done for {Item} in {Seconds:0}s: {Frames} frames, {N} samples with known faces",
+                item.Name,
+                sw.Elapsed.TotalSeconds,
+                frame,
+                timeline.Entries.Count);
             return true;
         }
         finally
