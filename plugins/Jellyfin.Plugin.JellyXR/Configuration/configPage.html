@@ -72,6 +72,34 @@
         box.appendChild(d);
       });
 
+      // "Test connection" right below the Xrayarr fields; uses the values typed in, not the saved ones
+      (function () {
+        var after = page.querySelector('#XrayarrPathMap').closest('.inputContainer');
+        var d = document.createElement('div');
+        d.style.marginBottom = '1.8em';
+        d.innerHTML = '<button is="emby-button" type="button" id="xrTest" class="raised"><span>Test Xrayarr connection</span></button>' +
+          '<div id="xrTestResult" class="fieldDescription" style="margin-top:.6em"></div>';
+        after.parentNode.insertBefore(d, after.nextSibling);
+        var out = d.querySelector('#xrTestResult');
+        d.querySelector('#xrTest').addEventListener('click', function () {
+          out.style.color = '';
+          out.textContent = 'Testing...';
+          ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('JellyXR/Xrayarr/Test'),
+            data: JSON.stringify({ Url: page.querySelector('#XrayarrUrl').value, ApiKey: page.querySelector('#XrayarrApiKey').value }),
+            contentType: 'application/json',
+            dataType: 'json'
+          }).then(function (r) {
+            out.style.color = r.ok ? '#52b54b' : '#cc3333';
+            out.textContent = (r.ok ? '✔ ' : '✖ ') + r.message;
+          }, function () {
+            out.style.color = '#cc3333';
+            out.textContent = '✖ Test request failed (plugin endpoint unreachable).';
+          });
+        });
+      })();
+
       function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       }

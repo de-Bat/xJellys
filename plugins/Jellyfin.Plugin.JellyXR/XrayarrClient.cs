@@ -152,6 +152,94 @@ public sealed class XrayarrClient
         }
     }
 
+    /// <summary>Checks URL and key without touching the saved settings. Returns a human readable verdict.</summary>
+    public async Task<(bool Ok, string Message)> TestAsync(string? baseUrl, string? apiKey, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) || !Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https"))
+        {
+            return (false, "Enter a URL like http://xray:8080");
+        }
+
+        var root = uri.ToString().TrimEnd('/');
+        var key = apiKey?.Trim();
+
+        async Task<(HttpStatusCode? Code, string Body, string? Error)> Get(string path, string? withKey)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, root + path);
+            req.Headers.Accept.ParseAdd("application/json");
+            if (!string.IsNullOrEmpty(withKey))
+            {
+                req.Headers.Add("X-Api-Key", withKey);
+            }
+
+            try
+            {
+                using var res = await _http.SendAsync(req, ct).ConfigureAwait(false);
+                return (res.StatusCode, await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false), null);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return (null, string.Empty, "timed out");
+            }
+            catch (HttpRequestException ex)
+            {
+                return (null, string.Empty, ex.Message);
+            }
+        }
+
+        var ping = await Get("/api/v1/system/ping", null).ConfigureAwait(false);
+        if (ping.Error is not null)
+        {
+            return (false, $"Cannot reach {root}: {ping.Error}");
+        }
+
+        if (ping.Code != HttpStatusCode.OK || !ping.Body.Contains("\"ok\"", StringComparison.Ordinal))
+        {
+            return (false, $"{root} answered {(int)ping.Code!} on /api/v1/system/ping; is this an Xrayarr server (base URL, no /api path)?");
+        }
+
+        var status = await Get("/api/v1/system/status", key).ConfigureAwait(false);
+        if (status.Code is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            return (false, string.IsNullOrEmpty(key)
+                ? "Xrayarr requires an API key (Xrayarr: Settings -> General)"
+                : "Xrayarr rejected the API key");
+        }
+
+        if (status.Error is not null || status.Code != HttpStatusCode.OK)
+        {
+            return (false, $"Xrayarr status check failed: {status.Error ?? ((int)status.Code!).ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        var version = "?";
+        try
+        {
+            using var doc = JsonDocument.Parse(status.Body);
+            if (doc.RootElement.TryGetProperty("version", out var v))
+            {
+                version = v.ToString();
+            }
+        }
+        catch (JsonException)
+        {
+            // version is cosmetic
+        }
+
+        var msg = $"Connected to Xrayarr {version}";
+        if (!string.IsNullOrEmpty(key))
+        {
+            // Xrayarr's default auth mode lets local addresses in without a key, so a wrong key would also "work".
+            var anon = await Get("/api/v1/system/status", null).ConfigureAwait(false);
+            if (anon.Code == HttpStatusCode.OK)
+            {
+                msg += ". Note: Xrayarr lets this server in without a key (auth disabled for local addresses), so the key itself was not verified";
+            }
+        }
+
+        return (true, msg);
+    }
+
     /// <summary>(found, ready timeline). found = Xrayarr knows the title (even if not scanned yet), so no other identity is tried.</summary>
     private async Task<(bool Found, XrayarrTimeline? Timeline)> FetchAsync(Configuration.PluginConfiguration cfg, string query, CancellationToken ct)
     {

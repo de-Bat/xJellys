@@ -6,5 +6,5 @@
   "owner": "xJellys",
   "category": "General",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.1.0.0: Xrayarr integration (scene data from an Xrayarr server, as the only source or as primary/fallback to the local face scan)."
+  "changelog": "1.1.1.0: Test Xrayarr connection button on the settings page (checks URL and API key before saving)."
 }
