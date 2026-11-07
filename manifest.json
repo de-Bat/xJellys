@@ -36,6 +36,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.1.1.0",
+        "changelog": "1.1.1.0: Test Xrayarr connection button on the settings page (checks URL and API key before saving).",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyXR-v1.1.1.0/Jellyfin.Plugin.JellyXR_1.1.1.0.zip",
+        "checksum": "532964498BDFDF2E12B85609643003BB",
+        "timestamp": "2026-11-07T19:47:23Z"
+      },
+      {
         "version": "1.1.0.0",
         "changelog": "1.1.0.0: Xrayarr integration (scene data from an Xrayarr server, as the only source or as primary/fallback to the local face scan).",
         "targetAbi": "10.9.0.0",
