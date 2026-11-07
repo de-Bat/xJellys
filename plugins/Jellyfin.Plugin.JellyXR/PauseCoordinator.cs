@@ -16,11 +16,13 @@ public sealed class PauseCoordinator : IHostedService
     private readonly ISessionManager _sessions;
     private readonly CardService _cards;
     private readonly FaceScanner _scanner;
+    private readonly XrayarrClient _xrayarr;
     private readonly ILogger<PauseCoordinator> _logger;
     private readonly ConcurrentDictionary<string, bool> _paused = new();
 
-    public PauseCoordinator(ISessionManager sessions, CardService cards, FaceScanner scanner, ILogger<PauseCoordinator> logger)
+    public PauseCoordinator(ISessionManager sessions, CardService cards, FaceScanner scanner, XrayarrClient xrayarr, ILogger<PauseCoordinator> logger)
     {
+        _xrayarr = xrayarr;
         _sessions = sessions;
         _cards = cards;
         _scanner = scanner;
@@ -51,7 +53,18 @@ public sealed class PauseCoordinator : IHostedService
             _paused[e.Session.Id] = false;
         }
 
-        if (cfg is { Enabled: true, ScanOnPlayback: true } && e.Item is Episode or Movie)
+        if (cfg is not { Enabled: true } || e.Item is not (Episode or Movie))
+        {
+            return;
+        }
+
+        // warm the Xrayarr cache so the first pause needs no network round trip
+        if (cfg.DataSource != DataSource.Local && XrayarrClient.Configured(cfg))
+        {
+            _ = _xrayarr.GetAsync(e.Item, CancellationToken.None);
+        }
+
+        if (cfg.ScanOnPlayback)
         {
             _scanner.Enqueue(e.Item);
         }
@@ -104,7 +117,7 @@ public sealed class PauseCoordinator : IHostedService
             return;
         }
 
-        var set = _cards.Build(e.Item, e.PlaybackPositionTicks ?? 0, cfg);
+        var set = await _cards.BuildAsync(e.Item, e.PlaybackPositionTicks ?? 0, cfg, CancellationToken.None).ConfigureAwait(false);
         if (set is null || set.Value.Cards.Count == 0)
         {
             return;

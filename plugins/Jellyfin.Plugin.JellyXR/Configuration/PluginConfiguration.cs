@@ -29,6 +29,21 @@ public enum CardMode
     Separate
 }
 
+public enum DataSource
+{
+    /// <summary>On-server face scan only.</summary>
+    Local,
+
+    /// <summary>Xrayarr only; no local face scan, no model download.</summary>
+    Xrayarr,
+
+    /// <summary>Xrayarr first; local face scan for items Xrayarr has no ready timeline for.</summary>
+    XrayarrThenLocal,
+
+    /// <summary>Local face scan first; Xrayarr for items without a local timeline.</summary>
+    LocalThenXrayarr
+}
+
 public class SeriesRule
 {
     public string SeriesId { get; set; } = string.Empty;
@@ -76,6 +91,18 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>When an item without scene data starts playing, scan it in the background.</summary>
     public bool ScanOnPlayback { get; set; } = true;
+
+    /// <summary>Where "who is on screen" comes from.</summary>
+    public DataSource DataSource { get; set; } = DataSource.Local;
+
+    /// <summary>Xrayarr base URL, e.g. http://xray:8080.</summary>
+    public string XrayarrUrl { get; set; } = string.Empty;
+
+    /// <summary>Xrayarr API key (Settings -> General in Xrayarr).</summary>
+    public string XrayarrApiKey { get; set; } = string.Empty;
+
+    /// <summary>Optional path rewrite for path lookups: "jellyfinPrefix=xrayarrPrefix", several separated by ';'.</summary>
+    public string XrayarrPathMap { get; set; } = string.Empty;
 
     /// <summary>Zip with the SCRFD detector and ArcFace recognizer (insightface "buffalo_s": det_500m.onnx + w600k_mbf.onnx). Check the model license for your use.</summary>
     public string ModelZipUrl { get; set; } = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip";

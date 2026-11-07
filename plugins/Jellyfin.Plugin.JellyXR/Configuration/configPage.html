@@ -6,7 +6,7 @@
   <div data-role="content">
     <div class="content-primary">
       <h2>JellyXR</h2>
-      <p>X-Ray style cast cards. Pause on Android TV and the actors appear as a message. "On screen" needs a one-time face scan (Dashboard &rarr; Scheduled Tasks &rarr; <em>Scan videos for cast faces</em>, or automatic when an item first plays). Cast portraits must exist in Jellyfin.</p>
+      <p>X-Ray style cast cards. Pause on Android TV and the actors appear as a message. "On screen" needs a one-time face scan (Dashboard &rarr; Scheduled Tasks &rarr; <em>Scan videos for cast faces</em>, or automatic when an item first plays). Cast portraits must exist in Jellyfin. Instead of (or as fallback to) the local scan, scene data can come from an <a href="https://github.com/de-Bat/xrayarr" target="_blank">Xrayarr</a> server.</p>
       <form id="JellyXRConfigForm">
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="Enabled" type="checkbox" is="emby-checkbox" /><span>Enabled</span></label>
@@ -39,6 +39,10 @@
       var scopes = ['Scene', 'Episode', 'Current', 'Off'];
       var rules = [];
       var fields = [
+        ['DataSource', 'Scene data source (Local = face scan on this server, Xrayarr = Xrayarr server only, XrayarrThenLocal / LocalThenXrayarr = second one is the fallback)', 'select:Local|Xrayarr|XrayarrThenLocal|LocalThenXrayarr'],
+        ['XrayarrUrl', 'Xrayarr URL (e.g. http://xray:8080)', 'text'],
+        ['XrayarrApiKey', 'Xrayarr API key (Xrayarr: Settings &rarr; General)', 'password'],
+        ['XrayarrPathMap', 'Xrayarr path rewrite for path lookups, optional: jellyfinPrefix=xrayarrPrefix; separate several with ; (movies use TMDB id, episodes TVDB id + S/E first)', 'text'],
         ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
         ['Scope', 'Default scope', 'select:Current|Scene|Episode|Off'],
         ['CardMode', 'Card mode (Combined = one message, Separate = one message per actor)', 'select:Combined|Separate'],

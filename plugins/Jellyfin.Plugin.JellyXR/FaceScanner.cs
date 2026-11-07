@@ -1,4 +1,5 @@
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.JellyXR.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -17,6 +18,7 @@ public sealed class FaceScanner
     private readonly FaceEngine _engine;
     private readonly CastIndex _cast;
     private readonly TimelineStore _store;
+    private readonly XrayarrClient _xrayarr;
     private readonly ILogger<FaceScanner> _logger;
     private readonly SemaphoreSlim _one = new(1, 1);
     private readonly HashSet<Guid> _queued = new();
@@ -27,6 +29,7 @@ public sealed class FaceScanner
         FaceEngine engine,
         CastIndex cast,
         TimelineStore store,
+        XrayarrClient xrayarr,
         ILogger<FaceScanner> logger)
     {
         _library = library;
@@ -34,6 +37,7 @@ public sealed class FaceScanner
         _engine = engine;
         _cast = cast;
         _store = store;
+        _xrayarr = xrayarr;
         _logger = logger;
     }
 
@@ -48,6 +52,21 @@ public sealed class FaceScanner
     }
 
     public bool NeedsScan(BaseItem item) => item is Episode or Movie && !_store.Exists(item.Id);
+
+    /// <summary>False when the data source setting makes a local face scan pointless for this item (Xrayarr covers it).</summary>
+    public async Task<bool> WantsLocalScanAsync(BaseItem item, CancellationToken ct)
+    {
+        switch (Plugin.Instance!.Configuration.DataSource)
+        {
+            case DataSource.Xrayarr:
+                return false;
+            case DataSource.XrayarrThenLocal:
+                var xr = await _xrayarr.GetAsync(item, ct).ConfigureAwait(false);
+                return xr is not { Segments.Count: > 0 };
+            default:
+                return true;
+        }
+    }
 
     /// <summary>Fire and forget: scan one item in the background (one scan at a time).</summary>
     public void Enqueue(BaseItem item)
@@ -87,6 +106,11 @@ public sealed class FaceScanner
 
     public async Task<bool> ScanAsync(BaseItem item, IProgress<double>? progress, CancellationToken ct)
     {
+        if (!NeedsScan(item) || !await WantsLocalScanAsync(item, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+
         await _one.WaitAsync(ct).ConfigureAwait(false);
         try
         {

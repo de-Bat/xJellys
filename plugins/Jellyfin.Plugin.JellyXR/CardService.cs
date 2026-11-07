@@ -13,12 +13,23 @@ public sealed class CardService
 {
     private readonly FaceScanner _scanner;
     private readonly TimelineStore _store;
+    private readonly XrayarrClient _xrayarr;
 
-    public CardService(FaceScanner scanner, TimelineStore store)
+    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr)
     {
         _scanner = scanner;
         _store = store;
+        _xrayarr = xrayarr;
     }
+
+    /// <summary>Scene data sources in the order they are tried.</summary>
+    public static DataSource[] SourcesFor(Configuration.PluginConfiguration cfg) => cfg.DataSource switch
+    {
+        DataSource.Xrayarr => new[] { DataSource.Xrayarr },
+        DataSource.XrayarrThenLocal => new[] { DataSource.Xrayarr, DataSource.Local },
+        DataSource.LocalThenXrayarr => new[] { DataSource.Local, DataSource.Xrayarr },
+        _ => new[] { DataSource.Local }
+    };
 
     public static CastScope ScopeFor(BaseItem item, Configuration.PluginConfiguration cfg)
     {
@@ -34,7 +45,7 @@ public sealed class CardService
         return cfg.Scope == CastScope.Default ? CastScope.Current : cfg.Scope;
     }
 
-    public CardSet? Build(BaseItem item, long positionTicks, Configuration.PluginConfiguration cfg)
+    public async Task<CardSet?> BuildAsync(BaseItem item, long positionTicks, Configuration.PluginConfiguration cfg, CancellationToken ct)
     {
         var scope = ScopeFor(item, cfg);
         if (scope == CastScope.Off)
@@ -43,56 +54,64 @@ public sealed class CardService
         }
 
         var cast = _scanner.CastOf(item);
-        if (cast.Count == 0)
-        {
-            return null;
-        }
+        var sec = (int)TimeSpan.FromTicks(positionTicks).TotalSeconds;
 
-        string[] SceneNames()
+        // Jellyfin's cast supplies the canonical name and role; Xrayarr people missing from it are kept with Xrayarr's character.
+        Card? ToCard(string name, string? character, bool keepUnknown)
         {
-            var tl = _store.Load(item.Id);
-            if (tl is null)
+            var p = cast.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (p is null)
             {
-                return Array.Empty<string>();
+                return keepUnknown ? new Card(name, string.IsNullOrWhiteSpace(character) ? null : character) : null;
             }
 
-            var sec = (int)TimeSpan.FromTicks(positionTicks).TotalSeconds;
-            return TimelineStore.PeopleBetween(tl, sec - cfg.SceneBackSeconds, sec + cfg.SceneForwardSeconds).ToArray();
+            var role = string.IsNullOrWhiteSpace(p.Role) ? character : p.Role;
+            return new Card(p.Name, string.IsNullOrWhiteSpace(role) ? null : role);
         }
 
-        IReadOnlyList<Card> ToCards(IEnumerable<string> names)
+        // First source that has scene data for this item wins (even if nobody is on screen at this position).
+        async Task<List<Card>> SceneCards()
         {
-            var list = new List<Card>();
-            foreach (var n in names)
+            foreach (var source in SourcesFor(cfg))
             {
-                var p = cast.FirstOrDefault(c => string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase));
-                if (p is not null)
+                if (source == DataSource.Local)
                 {
-                    list.Add(new Card(p.Name, string.IsNullOrWhiteSpace(p.Role) ? null : p.Role));
+                    var tl = _store.Load(item.Id);
+                    if (tl is { Entries.Count: > 0 })
+                    {
+                        return TimelineStore.PeopleBetween(tl, sec - cfg.SceneBackSeconds, sec + cfg.SceneForwardSeconds)
+                            .Select(n => ToCard(n, null, false)).OfType<Card>().ToList();
+                    }
+                }
+                else
+                {
+                    var xr = await _xrayarr.GetAsync(item, ct).ConfigureAwait(false);
+                    if (xr is { Segments.Count: > 0 })
+                    {
+                        var ms = (long)TimeSpan.FromTicks(positionTicks).TotalMilliseconds;
+                        return xr.PeopleAround(ms, ms - (cfg.SceneBackSeconds * 1000L), ms + (cfg.SceneForwardSeconds * 1000L))
+                            .Select(p => ToCard(p.Name, p.Character, true)).OfType<Card>().ToList();
+                    }
                 }
             }
 
-            return list;
+            return new List<Card>();
         }
 
+        List<Card> WholeCast() => cast.Select(c => ToCard(c.Name, null, false)).OfType<Card>().ToList();
+
         var max = Math.Max(1, cfg.MaxCards);
+        CardSet? Make(string header, List<Card> cards) =>
+            cards.Count == 0 ? null : new CardSet(header, cards.Take(max).ToList());
+
         switch (scope)
         {
             case CastScope.Episode:
-                return new CardSet("Cast", ToCards(cast.Select(c => c.Name)).Take(max).ToList());
+                return Make("Cast", WholeCast());
             case CastScope.Scene:
-            {
-                var cards = ToCards(SceneNames()).Take(max).ToList();
-                return cards.Count == 0 ? null : new CardSet("On screen", cards);
-            }
-
+                return Make("On screen", await SceneCards().ConfigureAwait(false));
             default: // Current
-            {
-                var cards = ToCards(SceneNames()).Take(max).ToList();
-                return cards.Count > 0
-                    ? new CardSet("On screen", cards)
-                    : new CardSet("Cast", ToCards(cast.Select(c => c.Name)).Take(max).ToList());
-            }
+                return Make("On screen", await SceneCards().ConfigureAwait(false)) ?? Make("Cast", WholeCast());
         }
     }
 

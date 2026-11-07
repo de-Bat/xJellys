@@ -21,6 +21,12 @@ public class ScanTask : IScheduledTask
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        if (Plugin.Instance!.Configuration.DataSource == Configuration.DataSource.Xrayarr)
+        {
+            progress.Report(100); // scene data comes from Xrayarr only
+            return;
+        }
+
         var todo = _scanner.AllScannable().Where(_scanner.NeedsScan).ToList();
         for (var i = 0; i < todo.Count; i++)
         {
