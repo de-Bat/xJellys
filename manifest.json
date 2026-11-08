@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.0.3.0",
+        "changelog": "1.0.3.0: Own log file jellycap.log in the Jellyfin log folder (Debug and up, rolls at 10 MB). Server log unchanged.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.Jellycap-v1.0.3.0/Jellyfin.Plugin.Jellycap_1.0.3.0.zip",
+        "checksum": "02420669EDF1BA2E6755A7E44560DB65",
+        "timestamp": "2026-11-08T21:40:44Z"
+      },
+      {
         "version": "1.0.2.0",
         "changelog": "1.0.2.0: Detailed logging (recaps played, built, skipped and why; ffmpeg timeouts; cleanup results). Set Jellyfin.Plugin to Debug in logging.json for skip reasons.",
         "targetAbi": "10.9.0.0",
