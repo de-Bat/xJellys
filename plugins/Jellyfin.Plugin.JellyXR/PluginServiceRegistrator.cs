@@ -14,7 +14,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<TimelineStore>();
         serviceCollection.AddSingleton<XrayarrClient>();
         serviceCollection.AddSingleton<FaceScanner>();
+        serviceCollection.AddSingleton<CastTimelineService>();
         serviceCollection.AddSingleton<CardService>();
         serviceCollection.AddHostedService<PauseCoordinator>();
+        serviceCollection.AddHostedService<WebInjector>();
     }
 }

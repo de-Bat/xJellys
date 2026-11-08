@@ -17,6 +17,13 @@
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="ScanOnPlayback" type="checkbox" is="emby-checkbox" /><span>Scan an item in the background when it starts playing and has no scene data</span></label>
         </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="ShowAppearance" type="checkbox" is="emby-checkbox" /><span>Add appearance info to cards ("34 min on screen, next at 1:12:40")</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="InjectWebUi" type="checkbox" is="emby-checkbox" /><span>Show the cast timeline on movie and episode pages of the web client (restart Jellyfin after changing)</span></label>
+          <div class="fieldDescription">Edits jellyfin-web's index.html, or uses the File Transformation plugin when installed (needed if the web folder is read-only). Not available in the Android TV app.</div>
+        </div>
         <div id="fields"></div>
 
         <h3 style="margin-top:2em">Per show scope</h3>
@@ -30,6 +37,24 @@
 
         <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
       </form>
+
+      <h3 style="margin-top:2.5em">Cast timeline viewer</h3>
+      <div class="fieldDescription">Pick a movie or episode to see when each actor is on screen.</div>
+      <div class="inputContainer">
+        <label class="inputLabel inputLabelUnfocused" for="tlSearch">Search movie or episode</label>
+        <input id="tlSearch" type="text" is="emby-input" autocomplete="off" />
+      </div>
+      <div class="selectContainer">
+        <label class="selectLabel" for="tlPick">Result</label>
+        <select id="tlPick" is="emby-select"></select>
+      </div>
+      <div style="display:flex;gap:.6em;flex-wrap:wrap">
+        <button id="tlShow" is="emby-button" type="button" class="raised"><span>Show timeline</span></button>
+        <button id="tlScan" is="emby-button" type="button" class="raised"><span>Scan</span></button>
+        <button id="tlRescan" is="emby-button" type="button" class="raised"><span>Rescan</span></button>
+      </div>
+      <div id="tlMsg" class="fieldDescription" style="margin-top:.8em"></div>
+      <div id="tlView"></div>
     </div>
   </div>
   <script type="text/javascript">
@@ -157,12 +182,82 @@
           page.querySelector('#Enabled').checked = c.Enabled;
           page.querySelector('#ShowCharacter').checked = c.ShowCharacter;
           page.querySelector('#ScanOnPlayback').checked = c.ScanOnPlayback;
+          page.querySelector('#ShowAppearance').checked = c.ShowAppearance !== false;
+          page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
           rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
           renderRules();
           Dashboard.hideLoadingMsg();
         });
       });
+
+      // ---- cast timeline viewer ----
+      (function () {
+        var search = page.querySelector('#tlSearch');
+        var pick = page.querySelector('#tlPick');
+        var msg = page.querySelector('#tlMsg');
+        var view = page.querySelector('#tlView');
+        var timer = null;
+
+        function lib() {
+          if (window.JellyXR) { return Promise.resolve(window.JellyXR); }
+          return new Promise(function (ok, fail) {
+            var s = document.createElement('script');
+            s.src = ApiClient.getUrl('JellyXR/Web/xray.js');
+            s.onload = function () { ok(window.JellyXR); };
+            s.onerror = fail;
+            document.head.appendChild(s);
+          });
+        }
+
+        function label(i) {
+          if (i.Type === 'Episode') {
+            return (i.SeriesName || '') + ' S' + (i.ParentIndexNumber || 0) + 'E' + (i.IndexNumber || 0) + ' – ' + i.Name;
+          }
+          return i.Name + (i.ProductionYear ? ' (' + i.ProductionYear + ')' : '');
+        }
+
+        search.addEventListener('input', function () {
+          clearTimeout(timer);
+          timer = setTimeout(function () {
+            var q = search.value.trim();
+            if (q.length < 2) { return; }
+            ApiClient.getItems(ApiClient.getCurrentUserId(), { SearchTerm: q, IncludeItemTypes: 'Movie,Episode', Recursive: true, Limit: 30 }).then(function (res) {
+              var items = res.Items || [];
+              pick.innerHTML = items.map(function (i) {
+                return '<option value="' + esc(i.Id) + '">' + esc(label(i)) + '</option>';
+              }).join('');
+              msg.textContent = items.length ? '' : 'Nothing found.';
+            });
+          }, 300);
+        });
+
+        function show() {
+          if (!pick.value) { msg.textContent = 'Search and pick an item first.'; return; }
+          view.innerHTML = '';
+          msg.textContent = 'Loading...';
+          lib().then(function (x) {
+            return x.fetch(pick.value).then(function (tl) {
+              msg.textContent = '';
+              x.render(view, tl, { title: false });
+            }, function () {
+              msg.textContent = 'No scene data for this item yet. Use Scan (local face scan) or check Xrayarr.';
+            });
+          }, function () { msg.textContent = 'Could not load the timeline script.'; });
+        }
+
+        function scan(force) {
+          if (!pick.value) { msg.textContent = 'Search and pick an item first.'; return; }
+          ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('JellyXR/Timeline/' + pick.value + '/Scan', { force: !!force }), dataType: 'json' }).then(function (r) {
+            msg.textContent = r.message;
+          }, function () { msg.textContent = 'Scan request failed.'; });
+        }
+
+        page.querySelector('#tlShow').addEventListener('click', show);
+        pick.addEventListener('change', show);
+        page.querySelector('#tlScan').addEventListener('click', function () { scan(false); });
+        page.querySelector('#tlRescan').addEventListener('click', function () { scan(true); });
+      })();
 
       page.querySelector('#JellyXRConfigForm').addEventListener('submit', function (e) {
         e.preventDefault();
@@ -171,6 +266,8 @@
           c.Enabled = page.querySelector('#Enabled').checked;
           c.ShowCharacter = page.querySelector('#ShowCharacter').checked;
           c.ScanOnPlayback = page.querySelector('#ScanOnPlayback').checked;
+          c.ShowAppearance = page.querySelector('#ShowAppearance').checked;
+          c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
           c.SeriesRules = rules;
           fields.forEach(function (f) {
             var v = page.querySelector('#' + f[0]).value;

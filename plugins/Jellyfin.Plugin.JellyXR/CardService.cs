@@ -5,7 +5,8 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyXR;
 
-public readonly record struct Card(string Actor, string? Character);
+/// <param name="Info">Appearance summary ("34 min on screen, next at 1:12:40"), when enabled and known.</param>
+public readonly record struct Card(string Actor, string? Character, string? Info = null);
 
 public readonly record struct CardSet(string Header, IReadOnlyList<Card> Cards);
 
@@ -15,10 +16,12 @@ public sealed class CardService
     private readonly FaceScanner _scanner;
     private readonly TimelineStore _store;
     private readonly XrayarrClient _xrayarr;
+    private readonly CastTimelineService _timelines;
     private readonly ILogger<CardService> _logger;
 
-    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr, ILogger<CardService> logger)
+    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr, CastTimelineService timelines, ILogger<CardService> logger)
     {
+        _timelines = timelines;
         _scanner = scanner;
         _store = store;
         _xrayarr = xrayarr;
@@ -111,17 +114,41 @@ public sealed class CardService
         CardSet? Make(string header, List<Card> cards) =>
             cards.Count == 0 ? null : new CardSet(header, cards.Take(max).ToList());
 
-        switch (scope)
+        var set = scope switch
         {
-            case CastScope.Episode:
-                return Make("Cast", WholeCast());
-            case CastScope.Scene:
-                return Make("On screen", await SceneCards().ConfigureAwait(false));
-            default: // Current
-                return Make("On screen", await SceneCards().ConfigureAwait(false)) ?? Make("Cast", WholeCast());
+            CastScope.Episode => Make("Cast", WholeCast()),
+            CastScope.Scene => Make("On screen", await SceneCards().ConfigureAwait(false)),
+            _ => Make("On screen", await SceneCards().ConfigureAwait(false)) ?? Make("Cast", WholeCast()) // Current
+        };
+
+        return set is { } s && cfg.ShowAppearance ? await WithAppearanceAsync(item, s, sec, cfg, ct).ConfigureAwait(false) : set;
+    }
+
+    private async Task<CardSet> WithAppearanceAsync(BaseItem item, CardSet set, int sec, Configuration.PluginConfiguration cfg, CancellationToken ct)
+    {
+        try
+        {
+            var view = await _timelines.GetAsync(item, cfg, ct).ConfigureAwait(false);
+            if (view is null)
+            {
+                return set;
+            }
+
+            var cards = set.Cards
+                .Select(c => view.Find(c.Actor) is { } a ? c with { Info = CastTimelineService.Describe(a, sec) } : c)
+                .ToList();
+            return set with { Cards = cards };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Appearance info for {Item} failed: {Error}", item.Name, ex.Message);
+            return set;
         }
     }
 
-    public static string Format(Card card, bool showCharacter) =>
-        showCharacter && card.Character is not null ? $"{card.Actor} as {card.Character}" : card.Actor;
+    public static string Format(Card card, bool showCharacter)
+    {
+        var who = showCharacter && card.Character is not null ? $"{card.Actor} as {card.Character}" : card.Actor;
+        return card.Info is null ? who : $"{who} ({card.Info})";
+    }
 }

@@ -5,6 +5,7 @@
   "overview": "Scans videos once with on-server face recognition to learn which cast members appear when. Pause on Android TV and JellyXR sends text cards with the actors on screen (this scene) or the whole episode cast.",
   "owner": "xJellys",
   "category": "General",
+  "imagePath": "XRayarr.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.1.5.0: Fix scan failing on Jellyfin 10.11 (MissingMethodException in GetPeople/GetItemList). Cards are now sent even when the client (e.g. Android TV) reports no remote control."
+  "changelog": "1.2.0.0: Cast appearance timeline. Cards show time on screen and when the actor is next seen. New timeline viewer (with Scan / Rescan) in the plugin settings. Movie and episode pages of the web client get an X-Ray section with a bar per actor. Plugin icon."
 }

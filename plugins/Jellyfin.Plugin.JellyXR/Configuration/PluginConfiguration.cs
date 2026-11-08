@@ -74,6 +74,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Show "Actor as Character". False = actor only.</summary>
     public bool ShowCharacter { get; set; } = true;
 
+    /// <summary>Add appearance info to each card: time on screen and when the actor is next seen.</summary>
+    public bool ShowAppearance { get; set; } = true;
+
+    /// <summary>Add the cast timeline section to movie and episode pages of the Jellyfin web client.</summary>
+    public bool InjectWebUi { get; set; } = true;
+
     /// <summary>Scene window: seconds before the pause position that still count as "on screen".</summary>
     public int SceneBackSeconds { get; set; } = 10;
 

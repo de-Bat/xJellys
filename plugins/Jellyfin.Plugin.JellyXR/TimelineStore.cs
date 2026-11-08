@@ -36,6 +36,15 @@ public sealed class TimelineStore
 
     public bool Exists(Guid itemId) => File.Exists(PathFor(itemId));
 
+    /// <summary>Forget the face timeline so the item is scanned again.</summary>
+    public void Delete(Guid itemId)
+    {
+        if (File.Exists(PathFor(itemId)))
+        {
+            File.Delete(PathFor(itemId));
+        }
+    }
+
     public Timeline? Load(Guid itemId)
     {
         try
