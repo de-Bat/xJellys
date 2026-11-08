@@ -22,7 +22,7 @@ public sealed class CardService
         _scanner = scanner;
         _store = store;
         _xrayarr = xrayarr;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     /// <summary>Scene data sources in the order they are tried.</summary>

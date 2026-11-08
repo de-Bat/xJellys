@@ -34,6 +34,9 @@ git push --tags
 ```
 Tag format `<Folder>-v<version>`. Action builds, zips, creates Release, commits `manifest.json` to `main`.
 
+## Logs
+Each plugin also writes its own log file in the Jellyfin log folder (Dashboard → Logs): `jellyxr.log`, `jellycap.log`. Contains Debug and up (the server log only shows what its level allows). Rolls to `.log.1` at 10 MB.
+
 ## Plugins
 
 ### Jellycap (`plugins/Jellyfin.Plugin.Jellycap`)

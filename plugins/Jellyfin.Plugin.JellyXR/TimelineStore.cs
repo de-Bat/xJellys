@@ -27,7 +27,7 @@ public sealed class TimelineStore
 
     public TimelineStore(ILogger<TimelineStore> logger)
     {
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     private static string Dir => Path.Combine(Plugin.Instance!.DataDirectory, "timelines");

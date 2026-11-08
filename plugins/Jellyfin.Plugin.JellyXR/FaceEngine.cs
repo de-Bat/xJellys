@@ -33,7 +33,7 @@ public sealed class FaceEngine : IDisposable
     public FaceEngine(ModelManager models, ILogger<FaceEngine> logger)
     {
         _models = models;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public async Task EnsureLoadedAsync(CancellationToken ct)

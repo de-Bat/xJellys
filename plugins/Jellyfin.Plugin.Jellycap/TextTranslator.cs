@@ -23,7 +23,7 @@ public class TextTranslator
     public TextTranslator(IHttpClientFactory http, IApplicationPaths paths, ILogger<TextTranslator> logger)
     {
         _http = http;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
         _cacheFile = Path.Combine(paths.CachePath, "jellycap-translations.json");
     }
 

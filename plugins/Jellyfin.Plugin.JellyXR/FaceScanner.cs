@@ -38,7 +38,7 @@ public sealed class FaceScanner
         _cast = cast;
         _store = store;
         _xrayarr = xrayarr;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public IReadOnlyList<BaseItem> AllScannable()

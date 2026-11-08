@@ -32,7 +32,7 @@ public class RecapService
         _libraryManager = libraryManager;
         _libraryMonitor = libraryMonitor;
         _paths = paths;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public RecapPlanner Planner => _planner;

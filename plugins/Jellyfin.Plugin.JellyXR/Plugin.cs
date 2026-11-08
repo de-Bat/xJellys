@@ -12,6 +12,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        PluginLog.Init(applicationPaths.LogDirectoryPath);
         DataDirectory = Path.Combine(applicationPaths.DataPath, "jellyxr");
         Directory.CreateDirectory(DataDirectory);
     }

@@ -11,7 +11,7 @@ public class ScanTask : IScheduledTask
     public ScanTask(FaceScanner scanner, ILogger<ScanTask> logger)
     {
         _scanner = scanner;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public string Name => "Scan videos for cast faces";

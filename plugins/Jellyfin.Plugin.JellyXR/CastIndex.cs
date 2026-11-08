@@ -30,7 +30,7 @@ public sealed class CastIndex
         _library = library;
         _encoder = encoder;
         _engine = engine;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     private static string CacheFile => Path.Combine(Plugin.Instance!.DataDirectory, "cast.json");

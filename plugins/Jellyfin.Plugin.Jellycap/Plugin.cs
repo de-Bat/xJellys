@@ -12,6 +12,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        PluginLog.Init(applicationPaths.LogDirectoryPath);
     }
 
     public static Plugin? Instance { get; private set; }

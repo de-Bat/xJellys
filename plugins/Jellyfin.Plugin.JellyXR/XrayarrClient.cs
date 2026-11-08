@@ -88,7 +88,7 @@ public sealed class XrayarrClient
 
     public XrayarrClient(ILogger<XrayarrClient> logger)
     {
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public static bool Configured(Configuration.PluginConfiguration cfg) => !string.IsNullOrWhiteSpace(cfg.XrayarrUrl);

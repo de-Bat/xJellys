@@ -26,7 +26,7 @@ public sealed class PauseCoordinator : IHostedService
         _sessions = sessions;
         _cards = cards;
         _scanner = scanner;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public Task StartAsync(CancellationToken cancellationToken)

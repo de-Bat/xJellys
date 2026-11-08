@@ -6,5 +6,5 @@
   "owner": "xJellys",
   "category": "General",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.0.2.0: Detailed logging (recaps played, built, skipped and why; ffmpeg timeouts; cleanup results). Set Jellyfin.Plugin to Debug in logging.json for skip reasons."
+  "changelog": "1.0.3.0: Own log file jellycap.log in the Jellyfin log folder (Debug and up, rolls at 10 MB). Server log unchanged."
 }

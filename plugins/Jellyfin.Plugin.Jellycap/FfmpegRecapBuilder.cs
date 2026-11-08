@@ -17,7 +17,7 @@ public class FfmpegRecapBuilder
     public FfmpegRecapBuilder(IMediaEncoder mediaEncoder, ILogger<FfmpegRecapBuilder> logger)
     {
         _mediaEncoder = mediaEncoder;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public static (int Width, int Height) Size(int height)

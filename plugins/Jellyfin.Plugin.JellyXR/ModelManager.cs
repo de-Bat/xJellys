@@ -14,7 +14,7 @@ public sealed class ModelManager
 
     public ModelManager(ILogger<ModelManager> logger)
     {
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     /// <summary>Test hook: use this folder instead of the plugin data folder.</summary>

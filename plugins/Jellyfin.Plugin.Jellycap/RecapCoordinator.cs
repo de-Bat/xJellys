@@ -26,7 +26,7 @@ public sealed class RecapCoordinator : IHostedService
     {
         _sessions = sessions;
         _recaps = recaps;
-        _logger = logger;
+        _logger = PluginLog.Wrap(logger);
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
