@@ -39,7 +39,7 @@ public class RecapPlanner
             }
         };
 
-        return _libraryManager.GetItemList(query).OfType<Episode>().ToList();
+        return _libraryManager.ItemsOf(query).OfType<Episode>().ToList();
     }
 
     public Episode? GetNext(Episode episode)

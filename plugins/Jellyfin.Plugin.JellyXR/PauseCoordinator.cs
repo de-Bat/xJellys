@@ -122,8 +122,9 @@ public sealed class PauseCoordinator : IHostedService
 
         if (!session.SupportsRemoteControl)
         {
-            _logger.LogDebug("No cards for {Item}: client {Client} on {Device} does not support remote control", e.Item.Name, session.Client, session.DeviceName);
-            return;
+            // Android TV and some other clients report false here (no open control socket at that
+            // moment) yet still show DisplayMessage. Sending is harmless when nobody listens, so try anyway.
+            _logger.LogDebug("Client {Client} on {Device} reports no remote control; sending cards anyway", session.Client, session.DeviceName);
         }
 
         if (!ClientMatches(cfg.ClientFilter, session, e))

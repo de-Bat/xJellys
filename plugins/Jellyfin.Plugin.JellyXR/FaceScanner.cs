@@ -43,7 +43,7 @@ public sealed class FaceScanner
 
     public IReadOnlyList<BaseItem> AllScannable()
     {
-        return _library.GetItemList(new InternalItemsQuery
+        return _library.ItemsOf(new InternalItemsQuery
         {
             IncludeItemTypes = new[] { BaseItemKind.Episode, BaseItemKind.Movie },
             IsVirtualItem = false,
@@ -199,7 +199,7 @@ public sealed class FaceScanner
     /// <summary>Actors and guest stars of an item.</summary>
     public List<PersonInfo> CastOf(BaseItem item)
     {
-        return _library.GetPeople(item)
+        return _library.GetPeopleOf(item)
             .Where(p => p.Type is PersonKind.Actor or PersonKind.GuestStar && !string.IsNullOrWhiteSpace(p.Name))
             .ToList();
     }
