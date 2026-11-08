@@ -51,6 +51,9 @@ if plugin is None:
     }
     data.append(plugin)
 
+if a.image_url:
+    plugin["imageUrl"] = a.image_url
+
 plugin["versions"] = [v for v in plugin["versions"] if v["version"] != a.version]
 plugin["versions"].insert(0, ver)
 MANIFEST.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")

@@ -53,6 +53,11 @@ jobs:
           jq --arg v "${{ steps.tag.outputs.version }}" --argjson a "$ASSEMBLIES" \
             '. + {version: $v, autoUpdate: true, assemblies: $a}' "plugins/$F/meta.json" > metaout/meta.json
           zip -j "$ZIP" metaout/meta.json
+          # plugin image (meta.json "imagePath", a file next to meta.json)
+          IMG="$(jq -r '.imagePath // empty' "plugins/$F/meta.json")"
+          if [ -n "$IMG" ] && [ -f "plugins/$F/$IMG" ]; then
+            zip -j "$ZIP" "plugins/$F/$IMG"
+          fi
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 
       - name: GitHub Release
@@ -67,6 +72,11 @@ jobs:
           ZIP="${{ steps.zip.outputs.zip }}"
           META="plugins/$F/meta.json"
           URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${ZIP}"
+          IMG="$(jq -r '.imagePath // empty' $META)"
+          IMG_URL=""
+          if [ -n "$IMG" ]; then
+            IMG_URL="https://raw.githubusercontent.com/${{ github.repository }}/main/plugins/$F/$IMG"
+          fi
           cp "$ZIP" /tmp/
           git fetch origin main
           git checkout -f main
@@ -74,7 +84,8 @@ jobs:
             --guid "$(jq -r .guid $META)" --name "$(jq -r .name $META)" \
             --description "$(jq -r .description $META)" --overview "$(jq -r .overview $META)" \
             --owner "$(jq -r .owner $META)" --category "$(jq -r .category $META)" \
-            --abi "$(jq -r .targetAbi $META)" --changelog "$(jq -r .changelog $META)"
+            --abi "$(jq -r .targetAbi $META)" --changelog "$(jq -r .changelog $META)" \
+            --image-url "$IMG_URL"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add manifest.json

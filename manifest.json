@@ -6,7 +6,7 @@
     "overview": "Builds a recap video from previous episodes (and from the already-watched part of a resumed episode) with ffmpeg, then tells the Android TV client to play it before the episode.",
     "owner": "xJellys",
     "category": "General",
-    "imageUrl": "",
+    "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.Jellycap/JellyCap.png",
     "versions": [
       {
         "version": "1.0.4.0",
@@ -57,7 +57,7 @@
     "overview": "Scans videos once with on-server face recognition to learn which cast members appear when. Pause on Android TV and JellyXR sends text cards with the actors on screen (this scene) or the whole episode cast.",
     "owner": "xJellys",
     "category": "General",
-    "imageUrl": "",
+    "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.JellyXR/XRayarr.png",
     "versions": [
       {
         "version": "1.1.5.0",

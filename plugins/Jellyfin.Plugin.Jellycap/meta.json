@@ -5,6 +5,7 @@
   "overview": "Builds a recap video from previous episodes (and from the already-watched part of a resumed episode) with ffmpeg, then tells the Android TV client to play it before the episode.",
   "owner": "xJellys",
   "category": "General",
+  "imagePath": "JellyCap.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.0.4.0: Fix episode lookup failing on Jellyfin 10.11 (MissingMethodException in GetItemList)."
+  "changelog": "1.0.5.0: Plugin icon. Includes 1.0.4.0: fix episode lookup failing on Jellyfin 10.11."
 }
