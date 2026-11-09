@@ -6,7 +6,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.JellyXR;
 
 /// <param name="Info">Appearance summary ("34 min on screen, next at 1:12:40"), when enabled and known.</param>
-public readonly record struct Card(string Actor, string? Character, string? Info = null);
+/// <param name="OnScreen">Seen around the pause position (scene data), as opposed to the rest of the cast.</param>
+public readonly record struct Card(string Actor, string? Character, string? Info = null, bool OnScreen = false);
 
 public readonly record struct CardSet(string Header, IReadOnlyList<Card> Cards);
 
@@ -110,15 +111,34 @@ public sealed class CardService
 
         List<Card> WholeCast() => cast.Select(c => ToCard(c.Name, null, false)).OfType<Card>().ToList();
 
-        var max = Math.Max(1, cfg.MaxCards);
+        // 0 = no limit
+        var max = cfg.MaxCards <= 0 ? int.MaxValue : cfg.MaxCards;
         CardSet? Make(string header, List<Card> cards) =>
             cards.Count == 0 ? null : new CardSet(header, cards.Take(max).ToList());
+
+        // Current: people on screen first, then (optionally) everyone else in the cast
+        async Task<CardSet?> Current()
+        {
+            var scene = (await SceneCards().ConfigureAwait(false)).Select(c => c with { OnScreen = true }).ToList();
+            if (scene.Count == 0)
+            {
+                return Make("Cast", WholeCast());
+            }
+
+            if (!cfg.AppendRestOfCast)
+            {
+                return Make("On screen", scene);
+            }
+
+            var rest = WholeCast().Where(c => !scene.Any(s => string.Equals(s.Actor, c.Actor, StringComparison.OrdinalIgnoreCase)));
+            return Make("On screen", scene.Concat(rest).ToList());
+        }
 
         var set = scope switch
         {
             CastScope.Episode => Make("Cast", WholeCast()),
-            CastScope.Scene => Make("On screen", await SceneCards().ConfigureAwait(false)),
-            _ => Make("On screen", await SceneCards().ConfigureAwait(false)) ?? Make("Cast", WholeCast()) // Current
+            CastScope.Scene => Make("On screen", (await SceneCards().ConfigureAwait(false)).Select(c => c with { OnScreen = true }).ToList()),
+            _ => await Current().ConfigureAwait(false)
         };
 
         return set is { } s && cfg.ShowAppearance ? await WithAppearanceAsync(item, s, sec, cfg, ct).ConfigureAwait(false) : set;

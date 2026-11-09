@@ -148,26 +148,76 @@ public sealed class PauseCoordinator : IHostedService
             session.DeviceName,
             set.Value.Cards.Count,
             set.Value.Header);
-        var timeout = Math.Max(2, cfg.CardSeconds) * 1000;
-        if (cfg.CardMode == CardMode.Combined)
+        // Android TV shows DisplayMessage as an Android toast: at most 2 lines, ~3.5 s, TimeoutMs ignored.
+        // So: pack names into pages that fit, and resend each page until CardSeconds is reached.
+        var pages = Paginate(set.Value, cfg);
+        var repeats = Math.Max(1, (int)Math.Ceiling(Math.Max(1, cfg.CardSeconds) / ToastSeconds));
+        _logger.LogDebug("{Count} page(s), each shown {Repeats}x", pages.Count, repeats);
+        foreach (var (header, text) in pages)
         {
-            var text = string.Join("\n", set.Value.Cards.Select(c => CardService.Format(c, cfg.ShowCharacter)));
-            await Send(session.Id, set.Value.Header, text, timeout).ConfigureAwait(false);
-            return;
-        }
-
-        foreach (var card in set.Value.Cards)
-        {
-            // stop if the user resumed in the meantime
-            if (!_paused.TryGetValue(session.Id, out var still) || !still)
+            for (var r = 0; r < repeats; r++)
             {
-                _logger.LogDebug("Playback resumed on {Device}; stopping cards", session.DeviceName);
-                return;
+                // stop if the user resumed in the meantime
+                if (!_paused.TryGetValue(session.Id, out var still) || !still)
+                {
+                    _logger.LogDebug("Playback resumed on {Device}; stopping cards", session.DeviceName);
+                    return;
+                }
+
+                await Send(session.Id, header, text, ToastMs).ConfigureAwait(false);
+                await Task.Delay(ToastMs).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Android's Toast.LENGTH_LONG.</summary>
+    private const double ToastSeconds = 3.5;
+
+    private const int ToastMs = 3500;
+
+    /// <summary>
+    /// Splits the cards into messages. Separate: one actor per message. Combined: as many actors as fit in
+    /// <c>MessageChars</c>, joined with " · " so they wrap instead of taking a line each. On screen and rest of cast never share a page.
+    /// </summary>
+    public static List<(string Header, string Text)> Paginate(CardSet set, PluginConfiguration cfg)
+    {
+        var pages = new List<(string, string)>();
+        var budget = Math.Max(20, cfg.MessageChars);
+        foreach (var group in set.Cards.GroupBy(c => c.OnScreen).OrderByDescending(g => g.Key))
+        {
+            var header = group.Key ? "On screen" : set.Cards.Any(c => c.OnScreen) ? "Also in cast" : set.Header;
+            var items = group.Select(c => CardService.Format(c, cfg.ShowCharacter)).ToList();
+            if (cfg.CardMode == CardMode.Separate)
+            {
+                pages.AddRange(items.Select(t => (header, t)));
+                continue;
             }
 
-            await Send(session.Id, set.Value.Header, CardService.Format(card, cfg.ShowCharacter), timeout).ConfigureAwait(false);
-            await Task.Delay(timeout).ConfigureAwait(false);
+            var line = new List<string>();
+            var len = header.Length + 7; // ": " and room for " 10/12"
+            foreach (var t in items)
+            {
+                if (line.Count > 0 && len + 3 + t.Length > budget)
+                {
+                    pages.Add((header, string.Join(" · ", line)));
+                    line.Clear();
+                    len = header.Length + 7; // ": " and room for " 10/12"
+                }
+
+                len += (line.Count > 0 ? 3 : 0) + t.Length;
+                line.Add(t);
+            }
+
+            if (line.Count > 0)
+            {
+                pages.Add((header, string.Join(" · ", line)));
+            }
         }
+
+        // number the pages so the viewer knows more are coming
+        return pages.Count <= 1
+            ? pages
+            : pages.Select((p, i) => ($"{p.Item1} {i + 1}/{pages.Count}", p.Item2)).ToList();
     }
 
     private Task Send(string sessionId, string header, string text, int timeoutMs)

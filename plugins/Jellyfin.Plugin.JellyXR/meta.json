@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "XRayarr.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.2.0.0: Cast appearance timeline. Cards show time on screen and when the actor is next seen. New timeline viewer (with Scan / Rescan) in the plugin settings. Movie and episode pages of the web client get an X-Ray section with a bar per actor. Plugin icon."
+  "changelog": "1.3.0.0: Android TV shows pause messages as 2-line toasts for 3.5 s. Cast is now packed into as many messages as needed (numbered 1/3, 2/3...), each repeated to stay up for the configured seconds. Current scope lists the rest of the cast after the people on screen. Max actors 0 = all (new default). New icon layout."
 }

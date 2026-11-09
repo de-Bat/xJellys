@@ -18,6 +18,9 @@
           <label class="emby-checkbox-label"><input id="ScanOnPlayback" type="checkbox" is="emby-checkbox" /><span>Scan an item in the background when it starts playing and has no scene data</span></label>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="AppendRestOfCast" type="checkbox" is="emby-checkbox" /><span>Current scope: after the people on screen, list the rest of the cast</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="ShowAppearance" type="checkbox" is="emby-checkbox" /><span>Add appearance info to cards ("34 min on screen, next at 1:12:40")</span></label>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -70,9 +73,10 @@
         ['XrayarrPathMap', 'Xrayarr path rewrite for path lookups, optional: jellyfinPrefix=xrayarrPrefix; separate several with ; (movies use TMDB id, episodes TVDB id + S/E first)', 'text'],
         ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
         ['Scope', 'Default scope', 'select:Current|Scene|Episode|Off'],
-        ['CardMode', 'Card mode (Combined = one message, Separate = one message per actor)', 'select:Combined|Separate'],
-        ['MaxCards', 'Max cards', 'number'],
-        ['CardSeconds', 'Seconds each message stays on screen', 'number'],
+        ['CardMode', 'Card mode (Combined = actors packed into as few messages as fit, Separate = one message per actor)', 'select:Combined|Separate'],
+        ['MaxCards', 'Max actors per pause (0 = all)', 'number'],
+        ['MessageChars', 'Characters per message in Combined mode (Android TV shows 2 lines, about 90 characters; lower it if text is cut off)', 'number'],
+        ['CardSeconds', 'Seconds each message stays on screen (Android TV messages last 3.5 s, so they are repeated to reach this)', 'number'],
         ['SceneBackSeconds', 'Scene window: seconds before the pause position', 'number'],
         ['SceneForwardSeconds', 'Scene window: seconds after the pause position', 'number'],
         ['ScanIntervalSeconds', 'Scan: one frame every N seconds (rescan needed after change)', 'number'],
@@ -183,6 +187,7 @@
           page.querySelector('#ShowCharacter').checked = c.ShowCharacter;
           page.querySelector('#ScanOnPlayback').checked = c.ScanOnPlayback;
           page.querySelector('#ShowAppearance').checked = c.ShowAppearance !== false;
+          page.querySelector('#AppendRestOfCast').checked = c.AppendRestOfCast !== false;
           page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
           rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
@@ -267,6 +272,7 @@
           c.ShowCharacter = page.querySelector('#ShowCharacter').checked;
           c.ScanOnPlayback = page.querySelector('#ScanOnPlayback').checked;
           c.ShowAppearance = page.querySelector('#ShowAppearance').checked;
+          c.AppendRestOfCast = page.querySelector('#AppendRestOfCast').checked;
           c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
           c.SeriesRules = rules;
           fields.forEach(function (f) {

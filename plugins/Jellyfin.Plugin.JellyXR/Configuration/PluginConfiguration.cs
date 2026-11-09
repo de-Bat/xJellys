@@ -66,9 +66,16 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public CardMode CardMode { get; set; } = CardMode.Combined;
 
-    public int MaxCards { get; set; } = 6;
+    /// <summary>Most actors per pause. 0 = no limit.</summary>
+    public int MaxCards { get; set; } = 0;
 
-    /// <summary>Seconds each message stays on screen (per card in Separate mode).</summary>
+    /// <summary>Current scope: after the people on screen, list the rest of the cast.</summary>
+    public bool AppendRestOfCast { get; set; } = true;
+
+    /// <summary>Characters per message in Combined mode. Android TV toasts show 2 lines, about 90 characters.</summary>
+    public int MessageChars { get; set; } = 90;
+
+    /// <summary>Seconds each message stays on screen. Android TV toasts last 3.5 s, so a message is resent to reach this.</summary>
     public int CardSeconds { get; set; } = 8;
 
     /// <summary>Show "Actor as Character". False = actor only.</summary>
