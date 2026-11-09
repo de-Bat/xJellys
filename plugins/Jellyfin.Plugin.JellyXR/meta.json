@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "XRayarr.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.4.0.0: Support for the JellyXR TV companion app for Android TV: with the app installed on the box, pausing shows a panel with cast portraits over the Jellyfin player instead of 2-line toasts (new setting \"JellyXR TV app: on pause show the portraits panel\", on by default). Devices without the app still get text messages."
+  "changelog": "1.5.0.0: X-Ray markers. Movies and episodes with X-Ray data get an \"X-Ray\" tag and join an \"X-Ray\" collection, so the Android TV app (which can't show plugin UI) shows which items have X-Ray: Collections -> X-Ray, or filter by tag. Optional: also add \"X-Ray\" as a genre so it shows on the TV movie page. New scheduled task \"Mark items with X-Ray data\" (daily 05:00). Settings: Mark items, Also add as genre, Marker name."
 }

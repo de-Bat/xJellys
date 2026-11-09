@@ -17,13 +17,15 @@ public sealed class PauseCoordinator : IHostedService
     private readonly CardService _cards;
     private readonly FaceScanner _scanner;
     private readonly XrayarrClient _xrayarr;
+    private readonly MarkerService _markers;
     private readonly ILogger<PauseCoordinator> _logger;
     private readonly ConcurrentDictionary<string, bool> _paused = new();
 
-    public PauseCoordinator(ISessionManager sessions, CardService cards, FaceScanner scanner, XrayarrClient xrayarr, ILogger<PauseCoordinator> logger)
+    public PauseCoordinator(ISessionManager sessions, CardService cards, FaceScanner scanner, XrayarrClient xrayarr, MarkerService markers, ILogger<PauseCoordinator> logger)
     {
         _xrayarr = xrayarr;
         _sessions = sessions;
+        _markers = markers;
         _cards = cards;
         _scanner = scanner;
         _logger = PluginLog.Wrap(logger);
@@ -66,6 +68,10 @@ public sealed class PauseCoordinator : IHostedService
         if (cfg.DataSource != DataSource.Local && XrayarrClient.Configured(cfg))
         {
             _ = _xrayarr.GetAsync(e.Item, CancellationToken.None);
+            if (cfg.MarkItems)
+            {
+                _markers.Queue(e.Item); // Xrayarr may have finished this item since the last marker sync
+            }
         }
 
         if (cfg.ScanOnPlayback)

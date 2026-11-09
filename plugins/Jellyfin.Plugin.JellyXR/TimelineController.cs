@@ -16,9 +16,11 @@ public sealed class TimelineController : ControllerBase
     private readonly FaceScanner _scanner;
     private readonly TimelineStore _store;
     private readonly CardService _cards;
+    private readonly MarkerService _markers;
 
-    public TimelineController(ILibraryManager library, CastTimelineService timelines, FaceScanner scanner, TimelineStore store, CardService cards)
+    public TimelineController(ILibraryManager library, CastTimelineService timelines, FaceScanner scanner, TimelineStore store, CardService cards, MarkerService markers)
     {
+        _markers = markers;
         _cards = cards;
         _library = library;
         _timelines = timelines;
@@ -105,6 +107,7 @@ public sealed class TimelineController : ControllerBase
         if (force)
         {
             _store.Delete(item.Id);
+            _markers.Queue(item); // unmarked until the rescan (or Xrayarr) has data again
         }
 
         var queued = _scanner.NeedsScan(item);

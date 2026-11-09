@@ -34,6 +34,19 @@
           <label class="emby-checkbox-label"><input id="TvOverlay" type="checkbox" is="emby-checkbox" /><span>JellyXR TV app: on pause show the portraits panel over the Android TV player (instead of text messages)</span></label>
           <div class="fieldDescription">Needs the JellyXR TV companion app (APK on the xJellys GitHub releases) on the Android TV box. Devices without the app keep getting text messages.</div>
         </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="MarkItems" type="checkbox" is="emby-checkbox" /><span>Mark movies and episodes that have X-Ray data (tag + collection)</span></label>
+          <div class="fieldDescription">Every client shows these, including the Android TV app: the collection appears under Collections, the tag works as a library filter. Kept up to date after each scan and by the scheduled task <em>Mark items with X-Ray data</em> (run it after changing these settings).</div>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="MarkGenre" type="checkbox" is="emby-checkbox" /><span>Also add it as a genre (shows on the Android TV movie page)</span></label>
+          <div class="fieldDescription">The genre line is the only place the Android TV app shows it on the item page. It mixes into the real genres; a metadata refresh that replaces all metadata removes it until the next marker run.</div>
+        </div>
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="MarkerName">Marker name (tag, collection and genre)</label>
+          <input id="MarkerName" type="text" is="emby-input" />
+          <div class="fieldDescription">Renaming leaves the old tag/genre on items until the marker task runs; the old collection stays and can be deleted by hand.</div>
+        </div>
         <div id="fields"></div>
 
         <h3 style="margin-top:2em">Per show scope</h3>
@@ -199,6 +212,9 @@
           page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
           page.querySelector('#WebOverlay').checked = c.WebOverlay !== false;
           page.querySelector('#TvOverlay').checked = c.TvOverlay !== false;
+          page.querySelector('#MarkItems').checked = c.MarkItems !== false;
+          page.querySelector('#MarkGenre').checked = c.MarkGenre === true;
+          page.querySelector('#MarkerName').value = c.MarkerName || 'X-Ray';
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
           rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
           renderRules();
@@ -286,6 +302,9 @@
           c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
           c.WebOverlay = page.querySelector('#WebOverlay').checked;
           c.TvOverlay = page.querySelector('#TvOverlay').checked;
+          c.MarkItems = page.querySelector('#MarkItems').checked;
+          c.MarkGenre = page.querySelector('#MarkGenre').checked;
+          c.MarkerName = page.querySelector('#MarkerName').value.trim() || 'X-Ray';
           c.SeriesRules = rules;
           fields.forEach(function (f) {
             var v = page.querySelector('#' + f[0]).value;

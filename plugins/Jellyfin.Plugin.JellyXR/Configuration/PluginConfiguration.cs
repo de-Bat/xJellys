@@ -96,6 +96,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Seconds the pause panel (web and TV companion) stays up. 0 = until playback resumes.</summary>
     public int OverlaySeconds { get; set; } = 0;
 
+    /// <summary>Mark items with X-Ray data: a tag and a collection (both named <see cref="MarkerName"/>), shown by every client including Android TV.</summary>
+    public bool MarkItems { get; set; } = true;
+
+    /// <summary>Also add <see cref="MarkerName"/> as a genre, so the Android TV app shows it on the movie page. Off by default: it mixes into real genres.</summary>
+    public bool MarkGenre { get; set; } = false;
+
+    /// <summary>Name of the tag, collection and genre that mark items with X-Ray data.</summary>
+    public string MarkerName { get; set; } = "X-Ray";
+
     /// <summary>Scene window: seconds before the pause position that still count as "on screen".</summary>
     public int SceneBackSeconds { get; set; } = 10;
 

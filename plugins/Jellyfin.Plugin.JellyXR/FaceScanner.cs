@@ -19,6 +19,7 @@ public sealed class FaceScanner
     private readonly CastIndex _cast;
     private readonly TimelineStore _store;
     private readonly XrayarrClient _xrayarr;
+    private readonly MarkerService _markers;
     private readonly ILogger<FaceScanner> _logger;
     private readonly SemaphoreSlim _one = new(1, 1);
     private readonly HashSet<Guid> _queued = new();
@@ -30,6 +31,7 @@ public sealed class FaceScanner
         CastIndex cast,
         TimelineStore store,
         XrayarrClient xrayarr,
+        MarkerService markers,
         ILogger<FaceScanner> logger)
     {
         _library = library;
@@ -38,6 +40,7 @@ public sealed class FaceScanner
         _cast = cast;
         _store = store;
         _xrayarr = xrayarr;
+        _markers = markers;
         _logger = PluginLog.Wrap(logger);
     }
 
@@ -182,6 +185,11 @@ public sealed class FaceScanner
             }
 
             _store.Save(item.Id, timeline);
+            if (Plugin.Instance!.Configuration.MarkItems)
+            {
+                _markers.Queue(item);
+            }
+
             _logger.LogInformation(
                 "JellyXR scan done for {Item} in {Seconds:0}s: {Frames} frames, {N} samples with known faces",
                 item.Name,
