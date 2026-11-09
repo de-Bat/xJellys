@@ -209,6 +209,33 @@ final class Api {
         return new JSONObject(t).optBoolean("Enabled", true);
     }
 
+    /** Tells Jellycap which playback device this app covers. False = overlay off in Jellycap, or Jellycap missing / older than 1.1. */
+    boolean jellycapHeartbeat(String watchedDeviceId) throws Exception {
+        try {
+            String t = text("POST", "/Jellycap/Companion/Heartbeat?deviceId=" + enc(watchedDeviceId), null);
+            return new JSONObject(t).optBoolean("Enabled", false);
+        } catch (HttpError e) {
+            if (e.code == 404) return false;
+            throw e;
+        }
+    }
+
+    /** Jellycap recap cards for the item playing on the watched device. Null = none (204). Status "preparing" = ask again. */
+    JSONObject recapOverlay(String itemId, String watchedDeviceId) throws Exception {
+        String t = text("GET", "/Jellycap/Overlay/" + enc(itemId) + "?deviceId=" + enc(watchedDeviceId), null);
+        return t.trim().isEmpty() ? null : new JSONObject(t);
+    }
+
+    /** Text recap: asks Jellycap to pause the episode while the cards show. */
+    void recapHold(String itemId, String watchedDeviceId) throws Exception {
+        call("POST", "/Jellycap/Overlay/" + enc(itemId) + "/Hold?deviceId=" + enc(watchedDeviceId), null);
+    }
+
+    /** Text recap over. resume = Jellycap seeks the episode back to its start position and plays it. */
+    void recapRelease(String itemId, String watchedDeviceId, boolean resume) throws Exception {
+        call("POST", "/Jellycap/Overlay/" + enc(itemId) + "/Release?deviceId=" + enc(watchedDeviceId) + "&resume=" + resume, null);
+    }
+
     Bitmap personImage(String personId, int heightPx) {
         try {
             byte[] b = call("GET", "/Items/" + enc(personId) + "/Images/Primary?fillHeight=" + heightPx

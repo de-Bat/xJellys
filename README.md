@@ -56,6 +56,7 @@ Text recap (`Recap format` setting: `Video` | `Text` | `Both`):
 - **Text** = title cards ("Previously on …", then `S01E02 · Name` + episode summary from Jellyfin metadata) rendered by ffmpeg/libass, so right-to-left scripts (Hebrew, Arabic) shape correctly. Reading time scales with text length. A resumed episode gets the same cards as a new one (a spoiler-free recap of the watched part needs video).
 - **Both** = a card before each video clip.
 - **Translation**: card labels are localized (`en he es fr de it pt ru ar`). Summaries are shown in the language stored in Jellyfin; set a *Translation server URL* (LibreTranslate compatible `POST /translate`) to machine-translate them to the chosen language. Translations are cached on disk; if the server is down the original text is used.
+- **JellyXR TV app** (1.1.0+ on the box, setting *Show text cards with the JellyXR TV app*, default on): the app draws the cards over the player instead of ffmpeg burning them into a video. **Text** = no recap video: the episode pauses, the cards show one after another, then it goes back to its start position and plays (press play to skip). **Both** = the clips-only recap video plays with each card over its clip. Without the app (or with JellyXR TV not running) recaps are videos as before.
 - **Fonts**: libass uses the server's fonts. Set *Text card font* to one that covers your language (e.g. `DejaVu Sans` on Linux for Hebrew; Windows `Arial` works).
 
 Choosing what gets a recap (plugin settings → **TV shows**):
@@ -83,7 +84,7 @@ Amazon X-Ray style cast cards for **Android TV** (any remote-controllable client
 - **JellyXR TV app** (`apps/JellyXR.TV`, optional): Android TV toasts are 2 lines for 3.5 s. Install the companion APK on the box and pausing shows a panel with portraits over the Jellyfin player instead (the plugin then stops sending toasts to that device). See below.
 
 ### JellyXR TV (`apps/JellyXR.TV`)
-Companion app for Android TV boxes. It runs in the background, follows the Jellyfin for Android TV session on the same box (polls `/Sessions` every second), and when playback pauses it draws the cast panel from `JellyXR/Cards` over the player. The remote keeps controlling Jellyfin. Needs JellyXR 1.4+.
+Companion app for Android TV boxes. It runs in the background, follows the Jellyfin for Android TV session on the same box (polls `/Sessions` every second), and when playback pauses it draws the cast panel from `JellyXR/Cards` over the player. The remote keeps controlling Jellyfin. Needs JellyXR 1.4+. With Jellycap 1.1+ it also draws Jellycap's recap text cards (`Jellycap/Overlay`).
 
 1. Download `JellyXR.TV-<version>.apk` from the [releases](https://github.com/de-Bat/xJellys/releases) and install it (adb, USB stick + file manager, or the Downloader app).
 2. Open **JellyXR TV**, find the server (LAN discovery) or type its address, sign in with **Quick Connect** (or user name and password; use the same user as the Jellyfin app).

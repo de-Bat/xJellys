@@ -17,6 +17,10 @@
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="PreBuildOnStop" type="checkbox" is="emby-checkbox" /><span>Build recaps when playback stops (mid-way = resume recap, finished = next episode)</span></label>
         </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="TvOverlay" type="checkbox" is="emby-checkbox" /><span>Show text cards with the JellyXR TV app</span></label>
+          <div class="fieldDescription checkboxFieldDescription">When the JellyXR TV app runs on the box, it draws the text cards over the player. Text recaps pause the episode for the cards (no video to build). Both recaps play the clips with the cards on top.</div>
+        </div>
         <div id="fields"></div>
 
         <h3 style="margin-top:2em">TV shows</h3>
@@ -142,6 +146,7 @@
           page.querySelector('#Enabled').checked = c.Enabled;
           page.querySelector('#PreGenerateNext').checked = c.PreGenerateNext;
           page.querySelector('#PreBuildOnStop').checked = c.PreBuildOnStop;
+          page.querySelector('#TvOverlay').checked = c.TvOverlay;
           page.querySelector('#OnlyListedSeries').checked = c.OnlyListedSeries;
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
           rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
@@ -157,6 +162,7 @@
           c.Enabled = page.querySelector('#Enabled').checked;
           c.PreGenerateNext = page.querySelector('#PreGenerateNext').checked;
           c.PreBuildOnStop = page.querySelector('#PreBuildOnStop').checked;
+          c.TvOverlay = page.querySelector('#TvOverlay').checked;
           c.OnlyListedSeries = page.querySelector('#OnlyListedSeries').checked;
           c.SeriesRules = rules;
           fields.forEach(function (f) {

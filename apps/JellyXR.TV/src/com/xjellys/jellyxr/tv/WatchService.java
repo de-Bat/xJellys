@@ -51,6 +51,23 @@ public class WatchService extends Service {
     private boolean serverPanelOn = true;
     private final Map<String, Bitmap> faces = new HashMap<>();
 
+    // Jellycap recap text cards
+    private static final long RECAP_ASK_MS = 60000, RECAP_GRACE_MS = 6000, HOLD_RETRY_MS = 3000, HOLD_GIVE_UP_MS = 20000, CAST_QUIET_MS = 4000;
+    private RecapCard recapCard;
+    private boolean jellycapOn;
+    private String recapItem, recapDevice;
+    /** Keep asking Jellycap until then while it prepares the cards for recapItem. */
+    private long recapAskUntil, recapSince;
+    /** Ready cards for recapItem, null = none. */
+    private JSONArray recapCards;
+    /** Pause mode (text recap over the paused episode) or timed mode (cards over the recap video). */
+    private boolean recapPause;
+    /** Pause mode: first / last Hold request, and when the pause was seen (0 = not yet). */
+    private long holdFirst, holdLast, holdT0;
+    private int recapShown = -1;
+    /** No cast panel until then: the episode is still reported paused right after the recap resumed it. */
+    private long castQuietUntil;
+
     static void start(Context ctx) {
         ctx.startForegroundService(new Intent(ctx, WatchService.class));
     }
@@ -65,6 +82,7 @@ public class WatchService extends Service {
         super.onCreate();
         prefs = new Prefs(this);
         panel = new CastPanel(this);
+        recapCard = new RecapCard(this);
         thread = new HandlerThread("jellyxr-poll");
         thread.start();
         worker = new Handler(thread.getLooper());
@@ -90,7 +108,7 @@ public class WatchService extends Service {
         worker.removeCallbacksAndMessages(null);
         thread.quitSafely();
         main.post(new Runnable() {
-            @Override public void run() { panel.hide(); }
+            @Override public void run() { panel.hide(); recapCard.hide(); }
         });
         status = "Stopped";
         super.onDestroy();
@@ -138,6 +156,7 @@ public class WatchService extends Service {
         }
 
         if (s == null) {
+            endRecap(api);
             changePause(false, null, 0);
             setStatus("Waiting for Jellyfin on this box to play something");
             return IDLE_POLL_MS;
@@ -154,6 +173,12 @@ public class WatchService extends Service {
                 // 404: JellyXR plugin too old (before 1.4) or missing; cards will tell
                 serverPanelOn = e.code != 403;
             }
+            try {
+                jellycapOn = api.jellycapHeartbeat(device);
+            } catch (Exception e) {
+                jellycapOn = false;
+                Log.w(TAG, "jellycap heartbeat failed", e);
+            }
         }
 
         JSONObject item = s.optJSONObject("NowPlayingItem");
@@ -167,9 +192,151 @@ public class WatchService extends Service {
         } else {
             setStatus("Watching " + label + ": " + (paused ? "paused" : "playing") + " " + item.optString("Name"));
         }
-        changePause(paused && serverPanelOn, item == null ? null : item.optString("Id"),
+        boolean recapOwns = recap(api, device, item, ps, paused, now);
+        if (recapCards != null) setStatus("Watching " + label + ": recap text cards for " + item.optString("Name"));
+        boolean castOk = !recapOwns && now >= castQuietUntil;
+        changePause(paused && serverPanelOn && castOk, item == null ? null : item.optString("Id"),
             ps == null ? 0 : ps.optLong("PositionTicks"));
-        return item == null ? IDLE_POLL_MS : POLL_MS;
+        return item == null ? IDLE_POLL_MS : recapCards != null ? POLL_MS / 2 : POLL_MS;
+    }
+
+    /**
+     * Jellycap recap text cards for the playing item. Pause mode: holds the episode paused while the cards
+     * show one after another, then lets Jellycap resume it. Timed mode: shows each card over its clip of the
+     * recap video, by playback position. Returns true while the recap owns the screen (no cast panel).
+     */
+    private boolean recap(Api api, String device, JSONObject item, JSONObject ps, boolean paused, long now) throws Exception {
+        String id = item == null ? null : item.optString("Id", null);
+        if (id == null || !id.equals(recapItem) || !device.equals(recapDevice)) {
+            endRecap(api);
+            recapItem = id;
+            recapDevice = device;
+            recapSince = now;
+            recapAskUntil = id != null && jellycapOn ? now + RECAP_ASK_MS : 0;
+        }
+        if (id == null) return false;
+
+        if (recapCards == null && now < recapAskUntil) {
+            JSONObject o = api.recapOverlay(id, device);
+            if (o == null) {
+                // nothing for this item; the first seconds Jellycap may not have seen the playback start yet
+                if (now - recapSince > RECAP_GRACE_MS) recapAskUntil = 0;
+            } else if ("ready".equals(o.optString("Status"))) {
+                recapAskUntil = 0;
+                JSONArray cards = o.optJSONArray("Cards");
+                if (cards != null && cards.length() > 0) {
+                    recapCards = cards;
+                    recapPause = "Pause".equals(o.optString("Mode"));
+                    holdFirst = holdLast = holdT0 = 0;
+                    recapShown = -1;
+                }
+            }
+        }
+        if (recapCards == null) return false;
+
+        if (!recapPause) {
+            showCard(cardAt(ps == null ? 0 : ps.optLong("PositionTicks") / 1e7));
+            return false;
+        }
+
+        if (holdT0 == 0) {
+            if (paused) {
+                holdT0 = now;
+            } else {
+                if (holdFirst == 0) holdFirst = now;
+                if (now - holdFirst > HOLD_GIVE_UP_MS) {
+                    Log.w(TAG, "episode never paused for the recap cards; giving up");
+                    finishPause(api, false);
+                    return false;
+                }
+                if (now - holdLast >= HOLD_RETRY_MS) {
+                    holdLast = now;
+                    api.recapHold(id, device);
+                }
+                return true;
+            }
+        }
+
+        if (!paused) {
+            // the user pressed play: drop the cards, leave the episode playing
+            finishPause(api, false);
+            return false;
+        }
+
+        double t = (now - holdT0) / 1000.0;
+        if (t >= recapEnd()) {
+            finishPause(api, true);
+            castQuietUntil = now + CAST_QUIET_MS;
+            return true;
+        }
+        showCard(cardAt(t));
+        return true;
+    }
+
+    /** Index of the card up at t seconds, or -1. */
+    private int cardAt(double t) {
+        for (int i = 0; recapCards != null && i < recapCards.length(); i++) {
+            JSONObject c = recapCards.optJSONObject(i);
+            double at = c.optDouble("At"), secs = c.optDouble("Seconds");
+            if (t >= at && t < at + secs) return i;
+        }
+        return -1;
+    }
+
+    private double recapEnd() {
+        double end = 0;
+        for (int i = 0; recapCards != null && i < recapCards.length(); i++) {
+            JSONObject c = recapCards.optJSONObject(i);
+            end = Math.max(end, c.optDouble("At") + c.optDouble("Seconds"));
+        }
+        return end;
+    }
+
+    private void showCard(final int idx) {
+        if (idx == recapShown) return;
+        recapShown = idx;
+        final JSONObject c = idx < 0 ? null : recapCards.optJSONObject(idx);
+        main.post(new Runnable() {
+            @Override public void run() {
+                if (c == null) {
+                    recapCard.hide();
+                    return;
+                }
+                try {
+                    recapCard.show(c.optString("Title"), str(c, "Body"));
+                } catch (Exception e) {
+                    setStatus("Could not draw the recap card: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /** Pause mode over: hide the card and tell Jellycap whether to resume the episode. */
+    private void finishPause(Api api, boolean resume) {
+        String item = recapItem, device = recapDevice;
+        clearRecap();
+        try {
+            api.recapRelease(item, device, resume);
+        } catch (Exception e) {
+            Log.w(TAG, "recap release failed", e);
+        }
+    }
+
+    /** The playing item changed or stopped: cards for the old one are over. */
+    private void endRecap(Api api) {
+        if (recapCards != null && recapPause) {
+            finishPause(api, false);
+        } else {
+            clearRecap();
+        }
+        recapItem = null;
+        recapAskUntil = 0;
+    }
+
+    private void clearRecap() {
+        recapCards = null;
+        showCard(-1);
+        recapShown = -1;
     }
 
     private void changePause(boolean paused, String itemId, long ticks) throws Exception {
