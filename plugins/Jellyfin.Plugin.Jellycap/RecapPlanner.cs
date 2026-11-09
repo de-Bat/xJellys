@@ -31,15 +31,18 @@ public class RecapPlanner
             AncestorIds = new[] { episode.SeriesId },
             IncludeItemTypes = new[] { BaseItemKind.Episode },
             IsVirtualItem = false,
-            Recursive = true,
-            OrderBy = new[]
-            {
-                (ItemSortBy.ParentIndexNumber, SortOrder.Ascending),
-                (ItemSortBy.IndexNumber, SortOrder.Ascending)
-            }
+            Recursive = true
         };
 
-        return _libraryManager.ItemsOf(query).OfType<Episode>().ToList();
+        // Sorted here, not via InternalItemsQuery.OrderBy: its SortOrder enum moved from
+        // Jellyfin.Data.Enums to Jellyfin.Database.Implementations.Enums in 10.11, so
+        // referencing it throws TypeLoadException on newer servers.
+        return _libraryManager.ItemsOf(query)
+            .OfType<Episode>()
+            .OrderBy(e => e.ParentIndexNumber ?? int.MaxValue)
+            .ThenBy(e => e.IndexNumber ?? int.MaxValue)
+            .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
+            .ToList();
     }
 
     public Episode? GetNext(Episode episode)
