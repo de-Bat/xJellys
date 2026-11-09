@@ -28,6 +28,12 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public string TranslationApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// When the JellyXR TV app runs on the playback device, it draws the text cards over the player:
+    /// Text recaps pause the episode for the cards (no video), Both recaps play the clips with the cards on top.
+    /// </summary>
+    public bool TvOverlay { get; set; } = true;
+
     /// <summary>Font for text cards. Must exist on the server and cover the language (e.g. "DejaVu Sans" for Hebrew on Linux). Empty = Arial.</summary>
     public string FontName { get; set; } = string.Empty;
 

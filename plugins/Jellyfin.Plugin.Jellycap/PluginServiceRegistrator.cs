@@ -13,6 +13,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<RecapPlanner>();
         serviceCollection.AddSingleton<FfmpegRecapBuilder>();
         serviceCollection.AddSingleton<RecapService>();
+        serviceCollection.AddSingleton<OverlayStore>();
         serviceCollection.AddHostedService<RecapCoordinator>();
     }
 }

@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "JellyCap.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.0.5.0: Plugin icon. Includes 1.0.4.0: fix episode lookup failing on Jellyfin 10.11."
+  "changelog": "1.1.0.0: Text cards on the JellyXR TV app overlay. When the JellyXR TV app (1.1.0 or newer) runs on the box, Text recaps pause the episode and show the cards over the player instead of playing a video, and Both recaps play the clips with the cards on top. Setting: Show text cards with the JellyXR TV app (default on)."
 }
