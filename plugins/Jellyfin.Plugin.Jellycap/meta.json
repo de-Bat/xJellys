@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "JellyCap.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.1.0.0: Text cards on the JellyXR TV app overlay. When the JellyXR TV app (1.1.0 or newer) runs on the box, Text recaps pause the episode and show the cards over the player instead of playing a video, and Both recaps play the clips with the cards on top. Setting: Show text cards with the JellyXR TV app (default on)."
+  "changelog": "1.1.1.0: Fix recaps failing on Jellyfin 10.11 and newer (TypeLoadException for Jellyfin.Data.Enums.SortOrder). Episodes are now ordered by the plugin instead of the library query."
 }
