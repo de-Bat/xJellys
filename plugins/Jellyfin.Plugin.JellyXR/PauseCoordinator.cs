@@ -127,6 +127,12 @@ public sealed class PauseCoordinator : IHostedService
             _logger.LogDebug("Client {Client} on {Device} reports no remote control; sending cards anyway", session.Client, session.DeviceName);
         }
 
+        if (cfg.WebOverlay && cfg.InjectWebUi && IsWebClient(session))
+        {
+            _logger.LogDebug("No text cards for {Item} on {Device}: the web client shows the X-Ray panel itself", e.Item.Name, session.DeviceName);
+            return;
+        }
+
         if (!ClientMatches(cfg.ClientFilter, session, e))
         {
             _logger.LogDebug("No cards for {Item}: client {Client} on {Device} does not match filter '{Filter}'", e.Item.Name, session.Client, session.DeviceName, cfg.ClientFilter);
@@ -228,6 +234,9 @@ public sealed class PauseCoordinator : IHostedService
             new MessageCommand { Header = header, Text = text, TimeoutMs = timeoutMs },
             CancellationToken.None);
     }
+
+    private static bool IsWebClient(SessionInfo session) =>
+        session.Client?.Contains("Jellyfin Web", StringComparison.OrdinalIgnoreCase) ?? false;
 
     private static bool ClientMatches(string filter, SessionInfo session, PlaybackProgressEventArgs e)
     {

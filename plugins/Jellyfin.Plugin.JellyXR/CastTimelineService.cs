@@ -221,18 +221,21 @@ public sealed class CastTimelineService
 
     private void AttachPerson(ActorAppearance actor)
     {
+        (actor.PersonId, actor.HasImage) = PersonOf(actor.Name);
+    }
+
+    /// <summary>Jellyfin person item id and whether it has a portrait.</summary>
+    public (Guid? Id, bool HasImage) PersonOf(string name)
+    {
         try
         {
-            var person = _library.GetPerson(actor.Name);
-            if (person is not null)
-            {
-                actor.PersonId = person.Id;
-                actor.HasImage = person.HasImage(ImageType.Primary);
-            }
+            var person = _library.GetPerson(name);
+            return person is null ? (null, false) : (person.Id, person.HasImage(ImageType.Primary));
         }
         catch (Exception ex)
         {
-            _logger.LogDebug("No person item for {Name}: {Error}", actor.Name, ex.Message);
+            _logger.LogDebug("No person item for {Name}: {Error}", name, ex.Message);
+            return (null, false);
         }
     }
 

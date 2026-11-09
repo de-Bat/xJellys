@@ -87,6 +87,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Add the cast timeline section to movie and episode pages of the Jellyfin web client.</summary>
     public bool InjectWebUi { get; set; } = true;
 
+    /// <summary>Web client: on pause show a panel with portraits instead of a text message (needs InjectWebUi).</summary>
+    public bool WebOverlay { get; set; } = true;
+
+    /// <summary>Seconds the web pause panel stays up. 0 = until playback resumes.</summary>
+    public int OverlaySeconds { get; set; } = 0;
+
     /// <summary>Scene window: seconds before the pause position that still count as "on screen".</summary>
     public int SceneBackSeconds { get; set; } = 10;
 

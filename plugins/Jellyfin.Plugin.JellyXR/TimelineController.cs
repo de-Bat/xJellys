@@ -15,9 +15,11 @@ public sealed class TimelineController : ControllerBase
     private readonly CastTimelineService _timelines;
     private readonly FaceScanner _scanner;
     private readonly TimelineStore _store;
+    private readonly CardService _cards;
 
-    public TimelineController(ILibraryManager library, CastTimelineService timelines, FaceScanner scanner, TimelineStore store)
+    public TimelineController(ILibraryManager library, CastTimelineService timelines, FaceScanner scanner, TimelineStore store, CardService cards)
     {
+        _cards = cards;
         _library = library;
         _timelines = timelines;
         _scanner = scanner;
@@ -38,6 +40,36 @@ public sealed class TimelineController : ControllerBase
 
         var view = await _timelines.GetAsync(item, cfg, ct).ConfigureAwait(false);
         return view is null ? NotFound() : view;
+    }
+
+    /// <summary>Pause cards for the web overlay: same people as the TV messages, plus portraits. 204 = nothing to show.</summary>
+    [HttpGet("Cards/{itemId}")]
+    [Authorize]
+    public async Task<ActionResult<object>> Cards([FromRoute] Guid itemId, [FromQuery] long positionTicks, CancellationToken ct)
+    {
+        var cfg = Plugin.Instance!.Configuration;
+        var item = _library.GetItemById(itemId);
+        if (!cfg.Enabled || !cfg.WebOverlay || item is not (Movie or Episode))
+        {
+            return NoContent();
+        }
+
+        var set = await _cards.BuildAsync(item, positionTicks, cfg, ct).ConfigureAwait(false);
+        if (set is null)
+        {
+            return NoContent();
+        }
+
+        return new
+        {
+            set.Value.Header,
+            OverlaySeconds = Math.Max(0, cfg.OverlaySeconds),
+            Cards = set.Value.Cards.Select(c =>
+            {
+                var (id, hasImage) = _timelines.PersonOf(c.Actor);
+                return new { c.Actor, Character = cfg.ShowCharacter ? c.Character : null, c.Info, c.OnScreen, PersonId = id, HasImage = hasImage };
+            }).ToList()
+        };
     }
 
     /// <summary>Queue a background face scan. force = drop the existing local timeline first.</summary>

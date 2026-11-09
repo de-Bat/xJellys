@@ -27,6 +27,9 @@
           <label class="emby-checkbox-label"><input id="InjectWebUi" type="checkbox" is="emby-checkbox" /><span>Show the cast timeline on movie and episode pages of the web client (restart Jellyfin after changing)</span></label>
           <div class="fieldDescription">Edits jellyfin-web's index.html, or uses the File Transformation plugin when installed (needed if the web folder is read-only). Not available in the Android TV app.</div>
         </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="WebOverlay" type="checkbox" is="emby-checkbox" /><span>Web client: on pause show a panel with cast portraits (instead of a text message)</span></label>
+        </div>
         <div id="fields"></div>
 
         <h3 style="margin-top:2em">Per show scope</h3>
@@ -82,6 +85,7 @@
         ['ScanIntervalSeconds', 'Scan: one frame every N seconds (rescan needed after change)', 'number'],
         ['MatchThreshold', 'Face match threshold (0.25 loose .. 0.5 strict)', 'float'],
         ['DetectThreshold', 'Face detection confidence (0.3 .. 0.8)', 'float'],
+        ['OverlaySeconds', 'Web pause panel: seconds it stays up (0 = until playback resumes)', 'number'],
         ['ModelZipUrl', 'Face model zip URL (insightface buffalo_s: det_500m.onnx + w600k_mbf.onnx; mind the model license)', 'text']
       ];
       var box = page.querySelector('#fields');
@@ -189,6 +193,7 @@
           page.querySelector('#ShowAppearance').checked = c.ShowAppearance !== false;
           page.querySelector('#AppendRestOfCast').checked = c.AppendRestOfCast !== false;
           page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
+          page.querySelector('#WebOverlay').checked = c.WebOverlay !== false;
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
           rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
           renderRules();
@@ -274,6 +279,7 @@
           c.ShowAppearance = page.querySelector('#ShowAppearance').checked;
           c.AppendRestOfCast = page.querySelector('#AppendRestOfCast').checked;
           c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
+          c.WebOverlay = page.querySelector('#WebOverlay').checked;
           c.SeriesRules = rules;
           fields.forEach(function (f) {
             var v = page.querySelector('#' + f[0]).value;

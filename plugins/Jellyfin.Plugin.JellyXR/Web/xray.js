@@ -144,6 +144,102 @@
     }, function () { /* 404: no scene data for this item */ }).then(function () { delete pending[id]; });
   }
 
+  // ---- pause panel over the web video player ----
+  var OV_STYLE = [
+    '.jxr-ov{position:fixed;top:5em;right:1.5em;width:min(24em,calc(100vw - 3em));max-height:calc(100vh - 12em);overflow:auto;',
+    'z-index:100000;padding:1em 1.1em;border-radius:12px;background:rgba(12,14,18,.84);color:#fff;',
+    '-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.45);font-size:.95em;animation:jxr-in .18s ease-out}',
+    '@keyframes jxr-in{from{opacity:0;transform:translateX(1em)}to{opacity:1;transform:none}}',
+    '.jxr-ov-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.7em}',
+    '.jxr-ov-head b{font-size:1.05em;letter-spacing:.02em}',
+    '.jxr-ov-x{background:none;border:0;color:inherit;font-size:1.4em;line-height:1;cursor:pointer;opacity:.7;padding:0 .2em}',
+    '.jxr-ov-x:hover{opacity:1}',
+    '.jxr-ov-card{display:flex;gap:.8em;align-items:center;margin:.55em 0}',
+    '.jxr-ov-card .jxr-face{width:3.6em;height:3.6em}',
+    '.jxr-ov-small .jxr-face{width:2.4em;height:2.4em}',
+    '.jxr-ov-t{min-width:0;line-height:1.25}',
+    '.jxr-ov-t b,.jxr-ov-t span,.jxr-ov-t em{display:block;overflow:hidden;text-overflow:ellipsis}',
+    '.jxr-ov-t span{opacity:.75;font-size:.9em}',
+    '.jxr-ov-t em{font-style:normal;opacity:.6;font-size:.8em}',
+    '.jxr-ov-sec{margin-top:.9em;padding-top:.6em;border-top:1px solid rgba(255,255,255,.15);font-size:.8em;opacity:.7;text-transform:uppercase;letter-spacing:.06em}'
+  ].join('');
+
+  var overlay = null, hideTimer = null, pauseSeq = 0;
+
+  function hideOverlay() {
+    pauseSeq++;
+    clearTimeout(hideTimer);
+    if (overlay && overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+    overlay = null;
+  }
+
+  function ovCard(c, small) {
+    return '<div class="jxr-ov-card' + (small ? ' jxr-ov-small' : '') + '">' +
+      '<div class="jxr-face"' + face({ PersonId: c.PersonId, HasImage: c.HasImage }) + '></div>' +
+      '<div class="jxr-ov-t"><b dir="auto">' + esc(c.Actor) + '</b>' +
+      (c.Character ? '<span dir="auto">' + esc(c.Character) + '</span>' : '') +
+      (c.Info && !small ? '<em>' + esc(c.Info) + '</em>' : '') + '</div></div>';
+  }
+
+  function showOverlay(d) {
+    css();
+    if (!document.getElementById('jxr-ov-style')) {
+      var s = document.createElement('style');
+      s.id = 'jxr-ov-style';
+      s.textContent = OV_STYLE;
+      document.head.appendChild(s);
+    }
+    clearTimeout(hideTimer);
+    if (overlay && overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
+    var on = d.Cards.filter(function (c) { return c.OnScreen; });
+    var rest = d.Cards.filter(function (c) { return !c.OnScreen; });
+    var html = '<div class="jxr-ov-head"><b>' + (on.length ? 'On screen' : esc(d.Header || 'Cast')) + '</b>' +
+      '<button class="jxr-ov-x" type="button" title="Close">×</button></div>';
+    html += (on.length ? on : rest).map(function (c) { return ovCard(c, false); }).join('');
+    if (on.length && rest.length) {
+      html += '<div class="jxr-ov-sec">Also in cast</div>' + rest.map(function (c) { return ovCard(c, true); }).join('');
+    }
+    overlay = document.createElement('div');
+    overlay.className = 'jxr-ov';
+    overlay.innerHTML = html;
+    // keep clicks on the panel from toggling the player underneath
+    overlay.addEventListener('click', function (e) { e.stopPropagation(); });
+    overlay.querySelector('.jxr-ov-x').addEventListener('click', hideOverlay);
+    document.body.appendChild(overlay);
+    if (d.OverlaySeconds > 0) { hideTimer = setTimeout(hideOverlay, d.OverlaySeconds * 1000); }
+  }
+
+  // what this browser is playing, from the server's view of this session
+  function nowPlaying() {
+    return ApiClient.getSessions({ deviceId: ApiClient.deviceId() }).then(function (list) {
+      var s = (list || []).filter(function (x) { return x.NowPlayingItem; })[0];
+      return s ? { id: s.NowPlayingItem.Id, ticks: (s.PlayState && s.PlayState.PositionTicks) || 0 } : null;
+    });
+  }
+
+  function isPlayerVideo(t) { return t && t.tagName === 'VIDEO'; }
+
+  document.addEventListener('pause', function (e) {
+    var v = e.target;
+    if (!isPlayerVideo(v) || v.ended || !window.ApiClient) { return; }
+    var seq = ++pauseSeq;
+    // give the player a moment to report the paused position to the server
+    setTimeout(function () {
+      if (seq !== pauseSeq || !v.paused) { return; }
+      nowPlaying().then(function (np) {
+        if (!np || seq !== pauseSeq || !v.paused) { return; }
+        return ApiClient.getJSON(ApiClient.getUrl('JellyXR/Cards/' + np.id, { positionTicks: np.ticks })).then(function (d) {
+          if (d && d.Cards && d.Cards.length && seq === pauseSeq && v.paused) { showOverlay(d); }
+        });
+      }).catch(function () { /* 204 = nothing to show, or not available */ });
+    }, 700);
+  }, true);
+
+  ['play', 'playing', 'emptied', 'ended'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) { if (isPlayerVideo(e.target)) { hideOverlay(); } }, true);
+  });
+  window.addEventListener('hashchange', hideOverlay);
+
   function later() { setTimeout(onView, 250); }
   document.addEventListener('viewshow', later);
   window.addEventListener('hashchange', later);
