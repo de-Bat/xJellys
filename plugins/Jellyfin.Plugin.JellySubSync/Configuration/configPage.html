@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>JellySubSync</title></head>
+<body>
+<div id="JellySubSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+  <div data-role="content">
+    <div class="content-primary">
+      <form id="JellySubSyncConfigForm">
+        <p>Shift subtitles from the TV remote. In Jellyfin on Android TV, with the <b>JellyXR TV</b> app (1.2.0 or newer) running,
+          pause, play and pause again within 4 seconds: a sync box opens. Left / right moves the subtitles by 0.25 s, up / down by 1 s,
+          OK applies and resumes playback on a "Synced" copy of the track. The original track is never changed; set the offset back to 0 to remove the copy.</p>
+
+        <div class="checkboxContainer">
+          <label class="emby-checkbox-label"><input id="Enabled" type="checkbox" is="emby-checkbox" /><span>Enabled</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="SaveNextToMedia" type="checkbox" is="emby-checkbox" /><span>Save next to the video</span></label>
+          <div class="fieldDescription checkboxFieldDescription">Off: the synced file goes into Jellyfin's metadata folder and the media folders stay untouched.
+            On: it goes next to the video file, which needs write access for the Jellyfin user. Turn on only if the synced track does not show up.</div>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="AdminsOnly" type="checkbox" is="emby-checkbox" /><span>Administrators only</span></label>
+          <div class="fieldDescription checkboxFieldDescription">The synced track is shared by every user of the server.</div>
+        </div>
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="MaxOffsetSeconds">Largest shift (seconds, either way)</label>
+          <input id="MaxOffsetSeconds" type="number" min="1" max="3600" is="emby-input" />
+        </div>
+        <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
+      </form>
+    </div>
+  </div>
+  <script type="text/javascript">
+    var guid = 'a50a5959-ae3c-433d-9698-5a62df894ed6';
+    var page = document.querySelector('#JellySubSyncConfigPage');
+    page.addEventListener('pageshow', function () {
+      Dashboard.showLoadingMsg();
+      ApiClient.getPluginConfiguration(guid).then(function (c) {
+        page.querySelector('#Enabled').checked = c.Enabled !== false;
+        page.querySelector('#SaveNextToMedia').checked = c.SaveNextToMedia === true;
+        page.querySelector('#AdminsOnly').checked = c.AdminsOnly === true;
+        page.querySelector('#MaxOffsetSeconds').value = c.MaxOffsetSeconds || 600;
+        Dashboard.hideLoadingMsg();
+      });
+    });
+    page.querySelector('#JellySubSyncConfigForm').addEventListener('submit', function (e) {
+      Dashboard.showLoadingMsg();
+      ApiClient.getPluginConfiguration(guid).then(function (c) {
+        c.Enabled = page.querySelector('#Enabled').checked;
+        c.SaveNextToMedia = page.querySelector('#SaveNextToMedia').checked;
+        c.AdminsOnly = page.querySelector('#AdminsOnly').checked;
+        c.MaxOffsetSeconds = parseInt(page.querySelector('#MaxOffsetSeconds').value, 10) || 600;
+        ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+      });
+      e.preventDefault();
+      return false;
+    });
+  </script>
+</div>
+</body>
+</html>

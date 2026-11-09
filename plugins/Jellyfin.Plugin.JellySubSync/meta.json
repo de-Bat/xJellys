@@ -1,0 +1,10 @@
+{
+  "guid": "a50a5959-ae3c-433d-9698-5a62df894ed6",
+  "name": "JellySubSync",
+  "description": "Shift subtitles earlier or later from the TV remote (JellyXR TV app).",
+  "overview": "Pause twice quickly in Jellyfin on Android TV and the JellyXR TV app shows a subtitle sync box. JellySubSync writes a shifted copy of the subtitle track (the original stays untouched), remembers the offset per item, and the app restarts playback on the synced track.",
+  "owner": "xJellys",
+  "category": "General",
+  "targetAbi": "10.9.0.0",
+  "changelog": "1.0.0.0: First release. Shifts text subtitles (SRT, ASS/SSA, WebVTT, and embedded text tracks) for the JellyXR TV app sync box (app 1.2.0 or newer)."
+}

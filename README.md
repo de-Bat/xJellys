@@ -35,7 +35,7 @@ git push --tags
 Tag format `<Folder>-v<version>`. Action builds, zips, creates Release, commits `manifest.json` to `main`.
 
 ## Logs
-Each plugin also writes its own log file in the Jellyfin log folder (Dashboard → Logs): `jellyxr.log`, `jellycap.log`. Contains Debug and up (the server log only shows what its level allows). Rolls to `.log.1` at 10 MB.
+Each plugin also writes its own log file in the Jellyfin log folder (Dashboard → Logs): `jellyxr.log`, `jellycap.log`, `jellysubsync.log`. Contains Debug and up (the server log only shows what its level allows). Rolls to `.log.1` at 10 MB.
 
 ## Plugins
 
@@ -83,8 +83,19 @@ Amazon X-Ray style cast cards for **Android TV** (any remote-controllable client
 - Native ONNX Runtime ships for `win-x64` and `linux-x64` only. Release tag: `Jellyfin.Plugin.JellyXR-v1.0.0.0`.
 - **JellyXR TV app** (`apps/JellyXR.TV`, optional): Android TV toasts are 2 lines for 3.5 s. Install the companion APK on the box and pausing shows a panel with portraits over the Jellyfin player instead (the plugin then stops sending toasts to that device). See below.
 
+### JellySubSync (`plugins/Jellyfin.Plugin.JellySubSync`)
+Shift subtitles earlier or later from the TV remote, together with the **JellyXR TV app** (1.2.0+).
+
+- **On the TV**: in Jellyfin for Android TV, with a subtitle track on, **pause, play and pause again within 4 s**. A sync box opens over the player and takes the remote: ◀ / ▶ = 0.25 s, ▲ / ▼ = 1 s (+ = subtitles later), **OK** or play = apply, **BACK** = close (closes by itself after 15 s idle). Applying restarts playback at the paused spot on the synced track (a 1–3 s reload).
+- **What it writes**: a shifted copy of the track, `<video name>.<lang>.Synced.<ext>`, which Jellyfin lists as an extra track titled *Synced*. The original track is never changed. Every shift is made from the original (no rounding drift). Offset 0 = back to the original and the copy is deleted. The offset is saved per item and track (`<jellyfin data>/jellysubsync`), and the box opens at the current value.
+- **Where**: by default in the item's Jellyfin metadata folder, so the media folders can stay read-only. Setting *Save next to the video* writes it beside the video file instead (needs write access for the Jellyfin user: Docker = media volume without `:ro`; Linux = `setfacl -R -m u:jellyfin:rwX <media>`; Windows = Modify rights for the service account).
+- **Tracks**: text subtitles only: external SRT, ASS/SSA, WebVTT, and embedded text tracks (extracted once with Jellyfin's ffmpeg and cached; the first sync of an embedded track can take a while on big files). Picture subtitles (PGS, VobSub) can't be shifted. File encodings are kept as is (only timestamps change).
+- The synced track is shared by all users; *Administrators only* restricts who may shift.
+
+Release: `git tag Jellyfin.Plugin.JellySubSync-v1.0.0.0 && git push --tags`.
+
 ### JellyXR TV (`apps/JellyXR.TV`)
-Companion app for Android TV boxes. It runs in the background, follows the Jellyfin for Android TV session on the same box (polls `/Sessions` every second), and when playback pauses it draws the cast panel from `JellyXR/Cards` over the player. The remote keeps controlling Jellyfin. Needs JellyXR 1.4+. With Jellycap 1.1+ it also draws Jellycap's recap text cards (`Jellycap/Overlay`).
+Companion app for Android TV boxes. It runs in the background, follows the Jellyfin for Android TV session on the same box (polls `/Sessions` every second), and when playback pauses it draws the cast panel from `JellyXR/Cards` over the player. The remote keeps controlling Jellyfin. Needs JellyXR 1.4+. With Jellycap 1.1+ it also draws Jellycap's recap text cards (`Jellycap/Overlay`). With JellySubSync it opens the subtitle sync box on a double pause (see JellySubSync above); while paused it polls faster (every 0.4 s, for 10 s) to catch the double pause.
 
 1. Download `JellyXR.TV-<version>.apk` from the [releases](https://github.com/de-Bat/xJellys/releases) and install it (adb, USB stick + file manager, or the Downloader app).
 2. Open **JellyXR TV**, find the server (LAN discovery) or type its address, sign in with **Quick Connect** (or user name and password; use the same user as the Jellyfin app).

@@ -14,6 +14,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -68,6 +69,26 @@ public class WatchService extends Service {
     /** No cast panel until then: the episode is still reported paused right after the recap resumed it. */
     private long castQuietUntil;
 
+    // JellySubSync box: pause, play and pause again within DOUBLE_PAUSE_MS opens it
+    private static final long DOUBLE_PAUSE_MS = 4000, FAST_POLL_MS = 400, FAST_WINDOW_MS = 10000, SUB_CHECK_MS = 3000, SUB_GIVE_UP_MS = 25000;
+    private SyncBox syncBox;
+    private boolean rawPaused;
+    private String rawItem;
+    /** When playback last resumed / paused (0 = not recently). */
+    private long resumedAt, pausedAt;
+    /** Box up (worker thread view). */
+    private volatile boolean syncOpen;
+    private boolean syncApplying;
+    /** What was playing when the box opened. */
+    private String syncSession, syncItemId, syncSource;
+    private long syncTicks;
+    private int syncAudio, syncSub;
+    private boolean syncCanSetSub;
+    /** After a restart: the synced stream the player should be on, -1 = nothing to check. */
+    private int pendingSub = -1;
+    private long pendingSince;
+    private boolean pendingSent;
+
     static void start(Context ctx) {
         ctx.startForegroundService(new Intent(ctx, WatchService.class));
     }
@@ -83,6 +104,7 @@ public class WatchService extends Service {
         prefs = new Prefs(this);
         panel = new CastPanel(this);
         recapCard = new RecapCard(this);
+        syncBox = new SyncBox(this);
         thread = new HandlerThread("jellyxr-poll");
         thread.start();
         worker = new Handler(thread.getLooper());
@@ -108,7 +130,7 @@ public class WatchService extends Service {
         worker.removeCallbacksAndMessages(null);
         thread.quitSafely();
         main.post(new Runnable() {
-            @Override public void run() { panel.hide(); recapCard.hide(); }
+            @Override public void run() { panel.hide(); recapCard.hide(); syncBox.hide(); }
         });
         status = "Stopped";
         super.onDestroy();
@@ -156,6 +178,7 @@ public class WatchService extends Service {
         }
 
         if (s == null) {
+            subSync(api, null, null, null, false, false, System.currentTimeMillis());
             endRecap(api);
             changePause(false, null, 0);
             setStatus("Waiting for Jellyfin on this box to play something");
@@ -194,10 +217,15 @@ public class WatchService extends Service {
         }
         boolean recapOwns = recap(api, device, item, ps, paused, now);
         if (recapCards != null) setStatus("Watching " + label + ": recap text cards for " + item.optString("Name"));
-        boolean castOk = !recapOwns && now >= castQuietUntil;
+        boolean syncUp = subSync(api, s, item, ps, paused, recapOwns || recapCards != null, now);
+        boolean castOk = !recapOwns && !syncUp && now >= castQuietUntil;
         changePause(paused && serverPanelOn && castOk, item == null ? null : item.optString("Id"),
             ps == null ? 0 : ps.optLong("PositionTicks"));
-        return item == null ? IDLE_POLL_MS : recapCards != null ? POLL_MS / 2 : POLL_MS;
+        if (item == null) return IDLE_POLL_MS;
+        if (recapCards != null) return POLL_MS / 2;
+        // poll faster around pauses so the double pause is seen
+        boolean fast = paused && now - pausedAt < FAST_WINDOW_MS || resumedAt > 0 && now - resumedAt < DOUBLE_PAUSE_MS || pendingSub >= 0;
+        return fast ? FAST_POLL_MS : POLL_MS;
     }
 
     /**
@@ -271,6 +299,167 @@ public class WatchService extends Service {
         }
         showCard(cardAt(t));
         return true;
+    }
+
+    /**
+     * JellySubSync box. Opens on a double pause (pause, play, pause within DOUBLE_PAUSE_MS), closes when
+     * playback goes on without it, and after a restart on the synced track checks the player really switched.
+     * Returns true while the box is up (no cast panel then).
+     */
+    private boolean subSync(Api api, JSONObject s, JSONObject item, JSONObject ps, boolean paused, boolean recapBusy, long now) {
+        String id = item == null ? null : item.optString("Id", null);
+        boolean sameItem = id != null && id.equals(rawItem);
+        if (paused && !rawPaused) {
+            boolean dbl = sameItem && resumedAt > 0 && now - resumedAt <= DOUBLE_PAUSE_MS;
+            pausedAt = now;
+            resumedAt = 0;
+            if (dbl && !syncOpen && !recapBusy && now >= castQuietUntil && pendingSub < 0) openSync(api, s, item, ps);
+        } else if (!paused && rawPaused) {
+            resumedAt = sameItem ? now : 0;
+        }
+        rawPaused = paused;
+        rawItem = id;
+
+        if (syncOpen && !syncApplying && (!paused || id == null || !id.equals(syncItemId))) {
+            // played on (phone, other remote) or a new item: the box is stale
+            syncOpen = false;
+            main.post(new Runnable() {
+                @Override public void run() { syncBox.hide(); }
+            });
+        }
+
+        if (pendingSub >= 0) {
+            if (now - pendingSince > SUB_GIVE_UP_MS) {
+                pendingSub = -1;
+                toast("Subtitles synced. If they did not change, pick the \"Synced\" track in the player's subtitle menu.");
+            } else if (s != null && id != null && id.equals(syncItemId) && !paused && ps != null) {
+                int cur = ps.has("SubtitleStreamIndex") ? ps.optInt("SubtitleStreamIndex", -1) : -1;
+                if (cur == pendingSub) {
+                    pendingSub = -1;
+                } else if (syncCanSetSub && !pendingSent && now - pendingSince > SUB_CHECK_MS) {
+                    // the player restarted on another track: ask it to switch
+                    pendingSent = true;
+                    try {
+                        api.setSubtitle(s.optString("Id"), pendingSub);
+                    } catch (Exception e) {
+                        Log.w(TAG, "SetSubtitleStreamIndex failed", e);
+                    }
+                }
+            }
+        }
+        return syncOpen;
+    }
+
+    private void openSync(Api api, JSONObject s, JSONObject item, JSONObject ps) {
+        syncSession = s.optString("Id");
+        syncItemId = item.optString("Id");
+        syncSource = ps.optString("MediaSourceId", "");
+        syncTicks = ps.optLong("PositionTicks");
+        syncAudio = ps.has("AudioStreamIndex") ? ps.optInt("AudioStreamIndex", -1) : -1;
+        syncSub = ps.has("SubtitleStreamIndex") ? ps.optInt("SubtitleStreamIndex", -1) : -1;
+        syncCanSetSub = supports(s, "SetSubtitleStreamIndex");
+
+        String track = null, message = null;
+        long offset = 0, max = 600000;
+        boolean ok = false;
+        if (syncSub < 0) {
+            message = "Turn on a subtitle track in the player first.";
+        } else {
+            try {
+                JSONObject t = api.subSyncTrack(syncItemId, syncSource, syncSub);
+                if (t == null) {
+                    message = "Install the JellySubSync plugin on the Jellyfin server.";
+                } else {
+                    ok = t.optBoolean("Supported");
+                    track = t.optString("Label", null);
+                    offset = t.optLong("OffsetMs");
+                    max = t.optLong("MaxOffsetMs", max);
+                    message = ok ? null : t.optString("Reason", "This track can't be shifted.");
+                }
+            } catch (Exception e) {
+                message = e.getMessage();
+            }
+        }
+        syncOpen = true;
+        final String fTrack = track, fMessage = message;
+        final long fOffset = offset, fMax = max;
+        final boolean fOk = ok;
+        main.post(new Runnable() {
+            @Override public void run() {
+                panel.hide();
+                try {
+                    syncBox.show(fTrack, fOffset, fMax, fOk, fMessage, new SyncBox.Listener() {
+                        @Override public void apply(final long offsetMs) {
+                            worker.post(new Runnable() {
+                                @Override public void run() { applySync(offsetMs); }
+                            });
+                        }
+
+                        @Override public void closed() {
+                            syncOpen = false;
+                        }
+                    });
+                } catch (Exception e) {
+                    syncOpen = false;
+                    setStatus("Could not draw the subtitle sync box: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /** Worker thread: shift on the server, then restart playback at the paused position on the synced track. */
+    private void applySync(final long offsetMs) {
+        if (!syncOpen || syncApplying) return;
+        syncApplying = true;
+        boxBusy(offsetMs == 0 ? "Back to the original subtitles..." : "Syncing subtitles...");
+        try {
+            Api api = Api.of(prefs);
+            int idx = api.subSyncApply(syncItemId, syncSource, syncSub, offsetMs);
+            boxBusy("Restarting playback...");
+            api.playAt(syncSession, syncItemId, syncSource, syncTicks, syncAudio, idx);
+            long now = System.currentTimeMillis();
+            pendingSub = idx;
+            pendingSince = now;
+            pendingSent = false;
+            castQuietUntil = now + 8000;
+            resumedAt = 0;
+            syncOpen = false;
+            final String msg = "Subtitles " + SyncBox.format(offsetMs) + (offsetMs == 0 ? " (original)" : "");
+            main.post(new Runnable() {
+                @Override public void run() { syncBox.done(msg); }
+            });
+        } catch (final Exception e) {
+            Log.w(TAG, "subtitle sync failed", e);
+            final String msg = e instanceof Api.HttpError ? e.getMessage() : "Could not reach the server: " + e.getMessage();
+            main.post(new Runnable() {
+                @Override public void run() { syncBox.failed(msg); }
+            });
+        } finally {
+            syncApplying = false;
+        }
+    }
+
+    private void boxBusy(final String msg) {
+        main.post(new Runnable() {
+            @Override public void run() { syncBox.busy(msg); }
+        });
+    }
+
+    private void toast(final String msg) {
+        main.post(new Runnable() {
+            @Override public void run() { Toast.makeText(WatchService.this, msg, Toast.LENGTH_LONG).show(); }
+        });
+    }
+
+    /** Session lists this remote control command (top level in 10.9+, under Capabilities before). */
+    private static boolean supports(JSONObject s, String command) {
+        JSONArray a = s.optJSONArray("SupportedCommands");
+        JSONObject caps = s.optJSONObject("Capabilities");
+        if (a == null && caps != null) a = caps.optJSONArray("SupportedCommands");
+        for (int i = 0; a != null && i < a.length(); i++) {
+            if (command.equals(a.optString(i))) return true;
+        }
+        return false;
     }
 
     /** Index of the card up at t seconds, or -1. */

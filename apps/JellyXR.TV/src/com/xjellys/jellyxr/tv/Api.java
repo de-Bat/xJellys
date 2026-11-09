@@ -31,6 +31,12 @@ final class Api {
             super("HTTP " + code + (msg == null || msg.isEmpty() ? "" : ": " + msg));
             this.code = code;
         }
+
+        /** plain = the server's own sentence, shown to the viewer as is. */
+        HttpError(int code, String msg, boolean plain) {
+            super(msg);
+            this.code = code;
+        }
     }
 
     private final String base;
@@ -82,30 +88,34 @@ final class Api {
         }
     }
 
-    private HttpURLConnection open(String method, String path) throws IOException {
+    private HttpURLConnection open(String method, String path, int readMs) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(base + path).openConnection();
         c.setRequestMethod(method);
         c.setConnectTimeout(5000);
-        c.setReadTimeout(10000);
+        c.setReadTimeout(readMs);
         c.setRequestProperty("Authorization", auth());
         c.setRequestProperty("Accept", "application/json");
         return c;
     }
 
     private byte[] call(String method, String path, String jsonBody) throws IOException {
+        return call(method, path, jsonBody, 10000);
+    }
+
+    private byte[] call(String method, String path, String jsonBody, int readMs) throws IOException {
         try {
-            return callOnce(method, path, jsonBody);
+            return callOnce(method, path, jsonBody, readMs);
         } catch (HttpError e) {
             throw e;
         } catch (IOException e) {
             // a pooled keep-alive connection the server already closed: retry reads once on a fresh one
             if (!"GET".equals(method)) throw e;
-            return callOnce(method, path, jsonBody);
+            return callOnce(method, path, jsonBody, readMs);
         }
     }
 
-    private byte[] callOnce(String method, String path, String jsonBody) throws IOException {
-        HttpURLConnection c = open(method, path);
+    private byte[] callOnce(String method, String path, String jsonBody, int readMs) throws IOException {
+        HttpURLConnection c = open(method, path, readMs);
         try {
             if (jsonBody != null) {
                 c.setDoOutput(true);
@@ -122,6 +132,13 @@ final class Api {
             if (code < 200 || code >= 300) {
                 InputStream err = c.getErrorStream();
                 String msg = err == null ? "" : new String(read(err), StandardCharsets.UTF_8);
+                try {
+                    // ASP.NET problem details: the readable reason is "detail"
+                    String detail = new JSONObject(msg).optString("detail", "");
+                    if (!detail.isEmpty()) throw new HttpError(code, detail, true);
+                } catch (org.json.JSONException ignored) {
+                    // not JSON
+                }
                 if (msg.length() > 160) msg = msg.substring(0, 160);
                 throw new HttpError(code, msg.trim());
             }
@@ -234,6 +251,47 @@ final class Api {
     /** Text recap over. resume = Jellycap seeks the episode back to its start position and plays it. */
     void recapRelease(String itemId, String watchedDeviceId, boolean resume) throws Exception {
         call("POST", "/Jellycap/Overlay/" + enc(itemId) + "/Release?deviceId=" + enc(watchedDeviceId) + "&resume=" + resume, null);
+    }
+
+    /**
+     * JellySubSync: can subtitle track streamIndex be shifted, and its current offset.
+     * Null = JellySubSync plugin missing on the server (404).
+     */
+    JSONObject subSyncTrack(String itemId, String mediaSourceId, int streamIndex) throws Exception {
+        try {
+            return new JSONObject(text("GET", "/JellySubSync/Track/" + enc(itemId) + "?streamIndex=" + streamIndex
+                + "&mediaSourceId=" + enc(mediaSourceId), null));
+        } catch (HttpError e) {
+            if (e.code == 404) return null;
+            throw e;
+        }
+    }
+
+    /**
+     * JellySubSync: shift the track to offsetMs from its original (0 = original). Returns the stream index to play.
+     * Slow the first time for a track inside the video (the server extracts it), hence the long timeout.
+     */
+    int subSyncApply(String itemId, String mediaSourceId, int streamIndex, long offsetMs) throws Exception {
+        String t = new String(call("POST", "/JellySubSync/Track/" + enc(itemId) + "?streamIndex=" + streamIndex
+            + "&offsetMs=" + offsetMs + "&mediaSourceId=" + enc(mediaSourceId), null, 180000), StandardCharsets.UTF_8);
+        return new JSONObject(t).getInt("StreamIndex");
+    }
+
+    /** Remote control: (re)start item on the session at ticks with these audio / subtitle tracks (negative = leave out). */
+    void playAt(String sessionId, String itemId, String mediaSourceId, long ticks, int audioIndex, int subtitleIndex) throws Exception {
+        StringBuilder q = new StringBuilder("/Sessions/").append(enc(sessionId)).append("/Playing?playCommand=PlayNow")
+            .append("&itemIds=").append(enc(itemId)).append("&startPositionTicks=").append(ticks);
+        if (mediaSourceId != null && !mediaSourceId.isEmpty()) q.append("&mediaSourceId=").append(enc(mediaSourceId));
+        if (audioIndex >= 0) q.append("&audioStreamIndex=").append(audioIndex);
+        if (subtitleIndex >= 0) q.append("&subtitleStreamIndex=").append(subtitleIndex);
+        call("POST", q.toString(), null);
+    }
+
+    /** Remote control: switch the session's subtitle track (clients that list SetSubtitleStreamIndex). */
+    void setSubtitle(String sessionId, int index) throws Exception {
+        JSONObject body = new JSONObject().put("Name", "SetSubtitleStreamIndex")
+            .put("Arguments", new JSONObject().put("Index", String.valueOf(index)));
+        call("POST", "/Sessions/" + enc(sessionId) + "/Command", body.toString());
     }
 
     Bitmap personImage(String personId, int heightPx) {
