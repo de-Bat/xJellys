@@ -15,6 +15,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         PluginLog.Init(applicationPaths.LogDirectoryPath);
         DataDirectory = Path.Combine(applicationPaths.DataPath, "jellysubsync");
         Directory.CreateDirectory(DataDirectory);
+        PluginLog.Note(typeof(Plugin).FullName!, $"JellySubSync {GetType().Assembly.GetName().Version} loaded, scope {Configuration.Scope}, data {DataDirectory}");
     }
 
     public static Plugin? Instance { get; private set; }

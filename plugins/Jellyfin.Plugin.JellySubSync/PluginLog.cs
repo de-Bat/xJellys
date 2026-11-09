@@ -54,6 +54,9 @@ internal static class PluginLog
 
     public static ILogger<T> Wrap<T>(ILogger<T> inner) => new TeeLogger<T>(inner);
 
+    /// <summary>A line only in the plugin log file (no server logger at hand, e.g. in the Plugin constructor).</summary>
+    public static void Note(string category, string message) => Write(LogLevel.Information, category, message, null);
+
     private static void Write(LogLevel level, string category, string message, Exception? ex)
     {
         var line = new StringBuilder()

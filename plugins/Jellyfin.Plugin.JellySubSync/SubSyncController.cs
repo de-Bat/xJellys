@@ -34,6 +34,19 @@ public sealed class SubSyncController : ControllerBase
     [HttpGet("Track/{itemId}")]
     public ActionResult<object> Track([FromRoute] Guid itemId, [FromQuery] int streamIndex, [FromQuery] string? mediaSourceId)
     {
+        try
+        {
+            return TrackCore(itemId, streamIndex, mediaSourceId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Subtitle track lookup failed for item {Item}, stream {Index}", itemId, streamIndex);
+            return Problem("Subtitle sync failed on the server: " + ex.Message + " (see jellysubsync.log)", statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    private ActionResult<object> TrackCore(Guid itemId, int streamIndex, string? mediaSourceId)
+    {
         var (item, error) = Find(itemId, mediaSourceId);
         if (item is null)
         {
@@ -60,35 +73,37 @@ public sealed class SubSyncController : ControllerBase
     [HttpPost("Track/{itemId}")]
     public async Task<ActionResult<object>> Apply([FromRoute] Guid itemId, [FromQuery] int streamIndex, [FromQuery] long offsetMs, [FromQuery] string? mediaSourceId, CancellationToken ct)
     {
-        var (item, error) = Find(itemId, mediaSourceId);
-        if (item is null)
-        {
-            return error!;
-        }
-
-        if (!SyncScopeFilter.Applies(item, Plugin.Instance!.Configuration, _library))
-        {
-            return Problem("Subtitle sync is not turned on for this title (JellySubSync settings).", statusCode: StatusCodes.Status403Forbidden);
-        }
-
-        if (Plugin.Instance!.Configuration.AdminsOnly && !User.IsInRole(AdminRole))
-        {
-            return Problem("Only administrators may sync subtitles (JellySubSync settings).", statusCode: StatusCodes.Status403Forbidden);
-        }
-
         try
         {
+            var (item, error) = Find(itemId, mediaSourceId);
+            if (item is null)
+            {
+                return error!;
+            }
+
+            if (!SyncScopeFilter.Applies(item, Plugin.Instance!.Configuration, _library))
+            {
+                return Problem("Subtitle sync is not turned on for this title (JellySubSync settings).", statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            if (Plugin.Instance!.Configuration.AdminsOnly && !User.IsInRole(AdminRole))
+            {
+                return Problem("Only administrators may sync subtitles (JellySubSync settings).", statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            _logger.LogInformation("Sync {Item} stream {Index} to {Offset} ms", item.Name, streamIndex, offsetMs);
             var index = await _sync.ApplyAsync(item, streamIndex, offsetMs, ct).ConfigureAwait(false);
             return new { StreamIndex = index, OffsetMs = offsetMs };
         }
         catch (SubSyncException ex)
         {
+            _logger.LogInformation("Sync refused for item {Item}: {Reason}", itemId, ex.Message);
             return Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Subtitle sync failed for {Item}", item.Name);
-            return Problem("Subtitle sync failed: " + ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+            _logger.LogError(ex, "Subtitle sync failed for item {Item}, stream {Index}", itemId, streamIndex);
+            return Problem("Subtitle sync failed on the server: " + ex.Message + " (see jellysubsync.log)", statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 
@@ -102,8 +117,7 @@ public sealed class SubSyncController : ControllerBase
         }
 
         var claim = User.FindFirst(UserIdClaim)?.Value;
-        var user = Guid.TryParse(claim, out var uid) ? _users.GetUserById(uid) : null;
-        if (user is null || !item.IsVisible(user))
+        if (!Guid.TryParse(claim, out var uid) || !ServerCompat.IsVisibleTo(item, _users, uid))
         {
             return (null, NotFound());
         }
