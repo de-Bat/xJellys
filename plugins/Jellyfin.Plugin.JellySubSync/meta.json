@@ -6,5 +6,5 @@
   "owner": "xJellys",
   "category": "General",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.0.0.0: First release. Shifts text subtitles (SRT, ASS/SSA, WebVTT, and embedded text tracks) for the JellyXR TV app sync box (app 1.2.0 or newer)."
+  "changelog": "1.0.0.0: First release. Shifts text subtitles (SRT, ASS/SSA, WebVTT, and embedded text tracks) for the JellyXR TV app sync box (app 1.2.0 or newer). Opt-in: turn it on for all titles, or only for chosen libraries, shows and movies."
 }

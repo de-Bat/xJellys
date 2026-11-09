@@ -2,7 +2,7 @@
 <html>
 <head><meta charset="utf-8"><title>JellySubSync</title></head>
 <body>
-<div id="JellySubSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+<div id="JellySubSyncConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
   <div data-role="content">
     <div class="content-primary">
       <form id="JellySubSyncConfigForm">
@@ -10,9 +10,36 @@
           pause, play and pause again within 4 seconds: a sync box opens. Left / right moves the subtitles by 0.25 s, up / down by 1 s,
           OK applies and resumes playback on a "Synced" copy of the track. The original track is never changed; set the offset back to 0 to remove the copy.</p>
 
-        <div class="checkboxContainer">
-          <label class="emby-checkbox-label"><input id="Enabled" type="checkbox" is="emby-checkbox" /><span>Enabled</span></label>
+        <div class="selectContainer">
+          <label class="selectLabel" for="Scope">Subtitle sync for</label>
+          <select id="Scope" is="emby-select">
+            <option value="Off">Nothing (off)</option>
+            <option value="All">All movies and episodes</option>
+            <option value="Selected">Only the libraries, shows and movies below</option>
+          </select>
+          <div class="fieldDescription">Titles without sync behave as before: a double pause opens no box.</div>
         </div>
+
+        <div id="selectedSection" style="display:none">
+          <h3>Libraries</h3>
+          <div class="fieldDescription">Every title in a checked library gets sync.</div>
+          <div id="libraries" style="margin:.5em 0 1.5em"></div>
+
+          <h3>Shows and movies</h3>
+          <div class="fieldDescription">A show includes all its episodes.</div>
+          <div class="inputContainer" style="margin-top:.8em">
+            <label class="inputLabel inputLabelUnfocused" for="search">Search</label>
+            <input id="search" type="text" is="emby-input" placeholder="Name of a show or movie" />
+          </div>
+          <div class="selectContainer">
+            <label class="selectLabel" for="results">Results</label>
+            <select id="results" is="emby-select"></select>
+          </div>
+          <button id="addMedia" is="emby-button" type="button" class="raised block"><span>Add</span></button>
+          <div id="media" style="margin:1em 0 1.5em"></div>
+        </div>
+
+        <h3>Options</h3>
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="SaveNextToMedia" type="checkbox" is="emby-checkbox" /><span>Save next to the video</span></label>
           <div class="fieldDescription checkboxFieldDescription">Off: the synced file goes into Jellyfin's metadata folder and the media folders stay untouched.
@@ -31,30 +58,138 @@
     </div>
   </div>
   <script type="text/javascript">
-    var guid = 'a50a5959-ae3c-433d-9698-5a62df894ed6';
-    var page = document.querySelector('#JellySubSyncConfigPage');
-    page.addEventListener('pageshow', function () {
-      Dashboard.showLoadingMsg();
-      ApiClient.getPluginConfiguration(guid).then(function (c) {
-        page.querySelector('#Enabled').checked = c.Enabled !== false;
-        page.querySelector('#SaveNextToMedia').checked = c.SaveNextToMedia === true;
-        page.querySelector('#AdminsOnly').checked = c.AdminsOnly === true;
-        page.querySelector('#MaxOffsetSeconds').value = c.MaxOffsetSeconds || 600;
-        Dashboard.hideLoadingMsg();
+    (function () {
+      var guid = 'a50a5959-ae3c-433d-9698-5a62df894ed6';
+      var page = document.querySelector('#JellySubSyncConfigPage');
+      var media = [];       // [{Id, Name, Type}]
+      var libraryIds = [];  // checked library ids
+      var searchTimer = null;
+
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+        });
+      }
+
+      function showSelected() {
+        page.querySelector('#selectedSection').style.display = page.querySelector('#Scope').value === 'Selected' ? '' : 'none';
+      }
+
+      function loadLibraries() {
+        return ApiClient.getVirtualFolders().then(function (folders) {
+          var list = (folders || []).filter(function (f) {
+            return ['music', 'books', 'photos', 'playlists', 'boxsets', 'livetv'].indexOf((f.CollectionType || '').toLowerCase()) < 0;
+          });
+          var host = page.querySelector('#libraries');
+          if (!list.length) {
+            host.innerHTML = '<p><em>No video libraries.</em></p>';
+            return;
+          }
+          host.innerHTML = list.map(function (f) {
+            var on = libraryIds.indexOf(f.ItemId) >= 0;
+            return '<div class="checkboxContainer"><label class="emby-checkbox-label">' +
+              '<input type="checkbox" is="emby-checkbox" data-lib="' + esc(f.ItemId) + '"' + (on ? ' checked' : '') + ' />' +
+              '<span>' + esc(f.Name) + '</span></label></div>';
+          }).join('');
+        });
+      }
+
+      function renderMedia() {
+        var host = page.querySelector('#media');
+        if (!media.length) {
+          host.innerHTML = '<p><em>No shows or movies picked.</em></p>';
+          return;
+        }
+        host.innerHTML = media.map(function (m, i) {
+          return '<div class="paperList" style="display:flex;justify-content:space-between;align-items:center;padding:.5em 1em;margin-bottom:.4em">' +
+            '<span>' + esc(m.Name) + ' <span style="opacity:.6">(' + (m.Type === 'Series' ? 'show' : 'movie') + ')</span></span>' +
+            '<button is="emby-button" type="button" class="raised" data-remove="' + i + '"><span>Remove</span></button></div>';
+        }).join('');
+      }
+
+      function search() {
+        var term = page.querySelector('#search').value.trim();
+        var sel = page.querySelector('#results');
+        if (term.length < 2) {
+          sel.innerHTML = '';
+          return;
+        }
+        ApiClient.getItems(ApiClient.getCurrentUserId(), {
+          SearchTerm: term, IncludeItemTypes: 'Series,Movie', Recursive: true, Limit: 30, SortBy: 'SortName'
+        }).then(function (res) {
+          var items = res.Items || [];
+          sel.innerHTML = items.length ? items.map(function (it) {
+            var year = it.ProductionYear ? ' (' + it.ProductionYear + ')' : '';
+            return '<option value="' + esc(it.Id) + '" data-type="' + esc(it.Type) + '" data-name="' + esc(it.Name + year) + '">' +
+              esc(it.Name + year) + ' - ' + (it.Type === 'Series' ? 'show' : 'movie') + '</option>';
+          }).join('') : '<option value="">No match</option>';
+        });
+      }
+
+      page.querySelector('#Scope').addEventListener('change', showSelected);
+
+      page.querySelector('#libraries').addEventListener('change', function (e) {
+        var id = e.target.getAttribute('data-lib');
+        if (!id) { return; }
+        libraryIds = libraryIds.filter(function (x) { return x !== id; });
+        if (e.target.checked) { libraryIds.push(id); }
       });
-    });
-    page.querySelector('#JellySubSyncConfigForm').addEventListener('submit', function (e) {
-      Dashboard.showLoadingMsg();
-      ApiClient.getPluginConfiguration(guid).then(function (c) {
-        c.Enabled = page.querySelector('#Enabled').checked;
-        c.SaveNextToMedia = page.querySelector('#SaveNextToMedia').checked;
-        c.AdminsOnly = page.querySelector('#AdminsOnly').checked;
-        c.MaxOffsetSeconds = parseInt(page.querySelector('#MaxOffsetSeconds').value, 10) || 600;
-        ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+
+      page.querySelector('#search').addEventListener('input', function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(search, 300);
       });
-      e.preventDefault();
-      return false;
-    });
+
+      page.querySelector('#addMedia').addEventListener('click', function () {
+        var sel = page.querySelector('#results');
+        var opt = sel.options[sel.selectedIndex];
+        if (!opt || !opt.value) { return; }
+        if (!media.some(function (m) { return m.Id === opt.value; })) {
+          media.push({ Id: opt.value, Name: opt.getAttribute('data-name'), Type: opt.getAttribute('data-type') });
+          renderMedia();
+        }
+      });
+
+      page.querySelector('#media').addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-remove]');
+        if (btn) {
+          media.splice(+btn.getAttribute('data-remove'), 1);
+          renderMedia();
+        }
+      });
+
+      page.addEventListener('pageshow', function () {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          page.querySelector('#Scope').value = c.Scope || 'Off';
+          libraryIds = (c.LibraryIds || []).slice();
+          media = (c.Media || []).slice();
+          page.querySelector('#SaveNextToMedia').checked = c.SaveNextToMedia === true;
+          page.querySelector('#AdminsOnly').checked = c.AdminsOnly === true;
+          page.querySelector('#MaxOffsetSeconds').value = c.MaxOffsetSeconds || 600;
+          showSelected();
+          renderMedia();
+          return loadLibraries();
+        }).catch(function () { }).then(function () {
+          Dashboard.hideLoadingMsg();
+        });
+      });
+
+      page.querySelector('#JellySubSyncConfigForm').addEventListener('submit', function (e) {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          c.Scope = page.querySelector('#Scope').value;
+          c.LibraryIds = libraryIds;
+          c.Media = media;
+          c.SaveNextToMedia = page.querySelector('#SaveNextToMedia').checked;
+          c.AdminsOnly = page.querySelector('#AdminsOnly').checked;
+          c.MaxOffsetSeconds = parseInt(page.querySelector('#MaxOffsetSeconds').value, 10) || 600;
+          ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+        });
+        e.preventDefault();
+        return false;
+      });
+    })();
   </script>
 </div>
 </body>

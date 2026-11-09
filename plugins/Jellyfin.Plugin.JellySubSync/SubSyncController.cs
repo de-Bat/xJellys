@@ -40,9 +40,17 @@ public sealed class SubSyncController : ControllerBase
             return error!;
         }
 
+        var cfg = Plugin.Instance!.Configuration;
+        var version = typeof(Plugin).Assembly.GetName().Version?.ToString();
+        if (!SyncScopeFilter.Applies(item, cfg, _library))
+        {
+            // the TV app opens no box for this title
+            return new { Allowed = false, Supported = false, Reason = "Subtitle sync is not turned on for this title.", OffsetMs = 0L, Label = string.Empty, MaxOffsetMs = 0L, Version = version };
+        }
+
         var s = _sync.GetState(item, streamIndex);
-        var maxMs = Math.Max(1, Plugin.Instance!.Configuration.MaxOffsetSeconds) * 1000L;
-        return new { s.Supported, s.Reason, s.OffsetMs, s.Label, MaxOffsetMs = maxMs, Version = typeof(Plugin).Assembly.GetName().Version?.ToString() };
+        var maxMs = Math.Max(1, cfg.MaxOffsetSeconds) * 1000L;
+        return new { Allowed = true, s.Supported, s.Reason, s.OffsetMs, s.Label, MaxOffsetMs = maxMs, Version = version };
     }
 
     /// <summary>
@@ -56,6 +64,11 @@ public sealed class SubSyncController : ControllerBase
         if (item is null)
         {
             return error!;
+        }
+
+        if (!SyncScopeFilter.Applies(item, Plugin.Instance!.Configuration, _library))
+        {
+            return Problem("Subtitle sync is not turned on for this title (JellySubSync settings).", statusCode: StatusCodes.Status403Forbidden);
         }
 
         if (Plugin.Instance!.Configuration.AdminsOnly && !User.IsInRole(AdminRole))
@@ -82,11 +95,6 @@ public sealed class SubSyncController : ControllerBase
     /// <summary>The video (the playing version when <paramref name="mediaSourceId"/> is given), visible to the caller.</summary>
     private (Video? Item, ActionResult? Error) Find(Guid itemId, string? mediaSourceId)
     {
-        if (!Plugin.Instance!.Configuration.Enabled)
-        {
-            return (null, Problem("JellySubSync is turned off in the plugin settings.", statusCode: StatusCodes.Status403Forbidden));
-        }
-
         var id = Guid.TryParse(mediaSourceId, out var ms) && ms != Guid.Empty ? ms : itemId;
         if (_library.GetItemById(id) is not Video item)
         {

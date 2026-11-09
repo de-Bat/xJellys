@@ -362,23 +362,23 @@ public class WatchService extends Service {
         String track = null, message = null;
         long offset = 0, max = 600000;
         boolean ok = false;
-        if (syncSub < 0) {
-            message = "Turn on a subtitle track in the player first.";
-        } else {
-            try {
-                JSONObject t = api.subSyncTrack(syncItemId, syncSource, syncSub);
-                if (t == null) {
-                    message = "Install the JellySubSync plugin on the Jellyfin server.";
-                } else {
-                    ok = t.optBoolean("Supported");
-                    track = t.optString("Label", null);
-                    offset = t.optLong("OffsetMs");
-                    max = t.optLong("MaxOffsetMs", max);
-                    message = ok ? null : t.optString("Reason", "This track can't be shifted.");
-                }
-            } catch (Exception e) {
-                message = e.getMessage();
+        try {
+            JSONObject t = api.subSyncTrack(syncItemId, syncSource, syncSub);
+            // sync is opt-in: no plugin, or not turned on for this title = a double pause is just a pause
+            if (t == null || !t.optBoolean("Allowed", true)) return;
+            if (syncSub < 0) {
+                message = "Turn on a subtitle track in the player first.";
+            } else {
+                ok = t.optBoolean("Supported");
+                track = t.optString("Label", null);
+                offset = t.optLong("OffsetMs");
+                max = t.optLong("MaxOffsetMs", max);
+                message = ok ? null : t.optString("Reason", "This track can't be shifted.");
             }
+        } catch (Exception e) {
+            Log.w(TAG, "subtitle sync lookup failed", e);
+            if (e instanceof Api.HttpError && ((Api.HttpError) e).code == 403) return;
+            message = e.getMessage();
         }
         syncOpen = true;
         final String fTrack = track, fMessage = message;

@@ -2,9 +2,39 @@ using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.JellySubSync.Configuration;
 
+/// <summary>Which titles get the subtitle sync box.</summary>
+public enum SyncScope
+{
+    /// <summary>Nowhere (default: sync is opt-in).</summary>
+    Off,
+
+    /// <summary>Every movie and episode.</summary>
+    All,
+
+    /// <summary>Only the libraries, shows and movies picked in the settings.</summary>
+    Selected
+}
+
+/// <summary>A show or movie picked for sync. Name and type are only for the settings page.</summary>
+public class SelectedMedia
+{
+    public string Id { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>"Series" or "Movie".</summary>
+    public string Type { get; set; } = string.Empty;
+}
+
 public class PluginConfiguration : BasePluginConfiguration
 {
-    public bool Enabled { get; set; } = true;
+    public SyncScope Scope { get; set; } = SyncScope.Off;
+
+    /// <summary>Selected scope: libraries (collection folder ids) where every title gets sync.</summary>
+    public string[] LibraryIds { get; set; } = Array.Empty<string>();
+
+    /// <summary>Selected scope: shows (every episode) and movies that get sync.</summary>
+    public SelectedMedia[] Media { get; set; } = Array.Empty<SelectedMedia>();
 
     /// <summary>
     /// Write the synced subtitle file next to the video instead of into Jellyfin's metadata folder.
