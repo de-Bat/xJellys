@@ -45,11 +45,12 @@ public sealed class TimelineController : ControllerBase
     /// <summary>Pause cards for the web overlay: same people as the TV messages, plus portraits. 204 = nothing to show.</summary>
     [HttpGet("Cards/{itemId}")]
     [Authorize]
-    public async Task<ActionResult<object>> Cards([FromRoute] Guid itemId, [FromQuery] long positionTicks, CancellationToken ct)
+    public async Task<ActionResult<object>> Cards([FromRoute] Guid itemId, [FromQuery] long positionTicks, [FromQuery] string? source, CancellationToken ct)
     {
         var cfg = Plugin.Instance!.Configuration;
         var item = _library.GetItemById(itemId);
-        if (!cfg.Enabled || !cfg.WebOverlay || item is not (Movie or Episode))
+        var wanted = string.Equals(source, "tv", StringComparison.OrdinalIgnoreCase) ? cfg.TvOverlay : cfg.WebOverlay;
+        if (!cfg.Enabled || !wanted || item is not (Movie or Episode))
         {
             return NoContent();
         }
@@ -70,6 +71,24 @@ public sealed class TimelineController : ControllerBase
                 return new { c.Actor, Character = cfg.ShowCharacter ? c.Character : null, c.Info, c.OnScreen, PersonId = id, HasImage = hasImage };
             }).ToList()
         };
+    }
+
+    /// <summary>
+    /// JellyXR TV companion app heartbeat: it watches the playback session of <paramref name="deviceId"/>,
+    /// so that device gets the portraits panel instead of text messages. Returns whether the panel is on.
+    /// </summary>
+    [HttpPost("Companion/Heartbeat")]
+    [Authorize]
+    public ActionResult<object> Heartbeat([FromQuery] string deviceId)
+    {
+        var cfg = Plugin.Instance!.Configuration;
+        var on = cfg.Enabled && cfg.TvOverlay;
+        if (on)
+        {
+            CompanionRegistry.Beat(deviceId);
+        }
+
+        return new { Enabled = on, Version = typeof(Plugin).Assembly.GetName().Version?.ToString() };
     }
 
     /// <summary>Queue a background face scan. force = drop the existing local timeline first.</summary>

@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "XRayarr.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.3.0.0: Web client: pausing shows a panel with cast portraits (on screen first, then the rest of the cast), until playback resumes. Android TV: pause messages are 2-line toasts lasting 3.5 s, so the cast is packed into numbered messages (1/3, 2/3...), each repeated to stay up for the configured seconds; Current scope lists the rest of the cast after the people on screen; Max actors 0 = all (new default). New icon layout."
+  "changelog": "1.4.0.0: Support for the JellyXR TV companion app for Android TV: with the app installed on the box, pausing shows a panel with cast portraits over the Jellyfin player instead of 2-line toasts (new setting \"JellyXR TV app: on pause show the portraits panel\", on by default). Devices without the app still get text messages."
 }

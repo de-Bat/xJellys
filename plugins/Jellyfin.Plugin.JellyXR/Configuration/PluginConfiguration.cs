@@ -90,7 +90,10 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Web client: on pause show a panel with portraits instead of a text message (needs InjectWebUi).</summary>
     public bool WebOverlay { get; set; } = true;
 
-    /// <summary>Seconds the web pause panel stays up. 0 = until playback resumes.</summary>
+    /// <summary>JellyXR TV companion app: on pause show the portraits panel over the Android TV player (and send that device no text messages).</summary>
+    public bool TvOverlay { get; set; } = true;
+
+    /// <summary>Seconds the pause panel (web and TV companion) stays up. 0 = until playback resumes.</summary>
     public int OverlaySeconds { get; set; } = 0;
 
     /// <summary>Scene window: seconds before the pause position that still count as "on screen".</summary>

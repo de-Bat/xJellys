@@ -133,6 +133,12 @@ public sealed class PauseCoordinator : IHostedService
             return;
         }
 
+        if (cfg.TvOverlay && CompanionRegistry.IsActive(session.DeviceId))
+        {
+            _logger.LogDebug("No text cards for {Item} on {Device}: the JellyXR TV app shows the panel there", e.Item.Name, session.DeviceName);
+            return;
+        }
+
         if (!ClientMatches(cfg.ClientFilter, session, e))
         {
             _logger.LogDebug("No cards for {Item}: client {Client} on {Device} does not match filter '{Filter}'", e.Item.Name, session.Client, session.DeviceName, cfg.ClientFilter);
