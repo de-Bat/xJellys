@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.Jellycap/JellyCap.png",
     "versions": [
       {
+        "version": "1.1.1.0",
+        "changelog": "1.1.1.0: Fix recaps failing on Jellyfin 10.11 and newer (TypeLoadException for Jellyfin.Data.Enums.SortOrder). Episodes are now ordered by the plugin instead of the library query.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.Jellycap-v1.1.1.0/Jellyfin.Plugin.Jellycap_1.1.1.0.zip",
+        "checksum": "797C10AC33D29115B3B63138C107B800",
+        "timestamp": "2026-11-09T22:33:04Z"
+      },
+      {
         "version": "1.1.0.0",
         "changelog": "1.1.0.0: Text cards on the JellyXR TV app overlay. When the JellyXR TV app (1.1.0 or newer) runs on the box, Text recaps pause the episode and show the cards over the player instead of playing a video, and Both recaps play the clips with the cards on top. Setting: Show text cards with the JellyXR TV app (default on).",
         "targetAbi": "10.9.0.0",
