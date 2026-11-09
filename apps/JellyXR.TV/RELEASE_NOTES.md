@@ -1,5 +1,7 @@
 JellyXR TV: companion app for Jellyfin on Android TV. Pause a movie or episode in Jellyfin and a panel with the cast (portraits, characters, who is on screen) appears over the player; it goes away when you resume.
 
+**New in 1.1.0:** Jellycap recap text cards. With the **Jellycap plugin 1.1.0.0 or newer**, Text recaps pause the episode and show the "Previously on" cards over the player (press play to skip), and Both recaps show each card over its clip.
+
 Needs the **JellyXR plugin 1.4.0.0 or newer** on the Jellyfin server.
 
 **Install**
