@@ -79,3 +79,14 @@ Amazon X-Ray style cast cards for **Android TV** (any remote-controllable client
 - Cards are sent as the Jellyfin `DisplayMessage` command; how the Android TV client renders it (toast/dialog, timeout) depends on the client version.
 - **Xrayarr** (`Data source` setting): scene data can come from an [Xrayarr](https://github.com/de-Bat/xrayarr) server instead of the local scan. `Local` (default) = local face scan only; `Xrayarr` = Xrayarr only (no local scan, no model download); `XrayarrThenLocal` = Xrayarr, local scan for items Xrayarr has no ready timeline for; `LocalThenXrayarr` = local timeline, Xrayarr for items without one. Set *Xrayarr URL* and *API key* (Xrayarr Settings → General). Lookup: movies by TMDB id, episodes by series TVDB id + season/episode, then by file path (optional *path rewrite* `jellyfinPrefix=xrayarrPrefix` if Jellyfin and Xrayarr mount media differently). The timeline is fetched once when playback starts and cached (6 h; 2 min for misses), so pausing needs no extra request. Xrayarr people not in Jellyfin's cast are still shown with Xrayarr's character name.
 - Native ONNX Runtime ships for `win-x64` and `linux-x64` only. Release tag: `Jellyfin.Plugin.JellyXR-v1.0.0.0`.
+- **JellyXR TV app** (`apps/JellyXR.TV`, optional): Android TV toasts are 2 lines for 3.5 s. Install the companion APK on the box and pausing shows a panel with portraits over the Jellyfin player instead (the plugin then stops sending toasts to that device). See below.
+
+### JellyXR TV (`apps/JellyXR.TV`)
+Companion app for Android TV boxes. It runs in the background, follows the Jellyfin for Android TV session on the same box (polls `/Sessions` every second), and when playback pauses it draws the cast panel from `JellyXR/Cards` over the player. The remote keeps controlling Jellyfin. Needs JellyXR 1.4+.
+
+1. Download `JellyXR.TV-<version>.apk` from the [releases](https://github.com/de-Bat/xJellys/releases) and install it (adb, USB stick + file manager, or the Downloader app).
+2. Open **JellyXR TV**, find the server (LAN discovery) or type its address, sign in with **Quick Connect** (or user name and password; use the same user as the Jellyfin app).
+3. **Allow overlay**. If the box has no such setting: `adb shell appops set com.xjellys.jellyxr.tv SYSTEM_ALERT_WINDOW allow`.
+4. Press **Test panel** to see it. It starts by itself after a reboot. **Watch** picks another player if automatic picks the wrong one.
+
+Plugin setting *JellyXR TV app: on pause show the portraits panel* turns it off server-wide. Build locally with `apps/JellyXR.TV/build.sh` (Android SDK + JDK 17, no Gradle). Release: `git tag app-JellyXR.TV-v1.0.0 && git push origin app-JellyXR.TV-v1.0.0` (needs repo secrets `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASS`).

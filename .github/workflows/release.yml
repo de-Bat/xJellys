@@ -8,6 +8,7 @@ on:
   push:
     tags:
       - '*-v[0-9]*'
+      - '!app-*'   # Android apps: release-app.yml
 
 permissions:
   contents: write
