@@ -14,7 +14,7 @@ using Xjellys.Overlay;
 namespace Jellyfin.Plugin.JellySubSync.Overlay;
 
 /// <summary>What the client host reads from a Jellyfin session.</summary>
-internal sealed record SessionView(string Id, Guid? NowPlayingItemId, int? SubtitleStreamIndex, string? MediaSourceId, bool CanSetSubtitle);
+internal sealed record SessionView(string Id, Guid? NowPlayingItemId, int? SubtitleStreamIndex, string? MediaSourceId, bool CanSetSubtitle, bool IsPaused = false);
 
 /// <summary>A remote command to a session: <c>Stop</c> or <c>SetSubtitleStreamIndex</c> (with Index). Never PlayNow.</summary>
 internal sealed record SessionCommand(string Name, int? Index);
@@ -39,6 +39,9 @@ public sealed class OverlayClientHost : IHostedService
     /// <summary>Session poll interval while waiting after Stop (as WatchService.stopAndWait).</summary>
     public const int StopPollMs = 300;
 
+    /// <summary>Session poll interval while a subtitle switch is pending (JellyXR TV FAST_POLL_MS).</summary>
+    public const int SwitchPollMs = 400;
+
     /// <summary>Every remote command this client sends. No PlayNow.</summary>
     internal static readonly string[] CommandNames = { "Stop", "SetSubtitleStreamIndex" };
 
@@ -60,6 +63,7 @@ public sealed class OverlayClientHost : IHostedService
     private readonly ConcurrentDictionary<string, BoxContext> _boxes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Pending> _pending = new(StringComparer.Ordinal);
     private Task _tail = Task.CompletedTask;
+    private int _timersRunning;
 
     public OverlayClientHost(ISessionManager sessions, ILibraryManager library, IUserManager users, SubSyncService sync, ILogger<OverlayClientHost> logger)
     {
@@ -119,6 +123,9 @@ public sealed class OverlayClientHost : IHostedService
 
     internal bool HasPending(string deviceId) => _pending.TryGetValue(deviceId, out var p) && p.Switch.Active;
 
+    /// <summary>Switch poll timers running (tests).</summary>
+    internal int TimersRunning => Volatile.Read(ref _timersRunning);
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         var bound = EnsureBound() is not null;
@@ -130,8 +137,17 @@ public sealed class OverlayClientHost : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _sessions.PlaybackStart -= OnPlayback;
-        _sessions.PlaybackProgress -= OnPlayback;
+        if (_sessions is not null)
+        {
+            _sessions.PlaybackStart -= OnPlayback;
+            _sessions.PlaybackProgress -= OnPlayback;
+        }
+
+        foreach (var (deviceId, p) in _pending)
+        {
+            Finish(deviceId, p);
+        }
+
         return Task.CompletedTask;
     }
 
@@ -298,6 +314,9 @@ public sealed class OverlayClientHost : IHostedService
             finally
             {
                 box.Applying = false;
+
+                // the box was replaced by a message: its context is used up
+                _boxes.TryRemove(new KeyValuePair<string, BoxContext>(deviceId, box));
             }
         });
         return Task.CompletedTask;
@@ -326,12 +345,7 @@ public sealed class OverlayClientHost : IHostedService
         Show(deviceId, SyncLayoutBuilder.Message("Stopping playback…", busy: true));
         await StopAndWaitAsync(box).ConfigureAwait(false);
 
-        var pending = _pending.GetOrAdd(deviceId, _ => new Pending(new PendingSubtitleSwitch(Clock)));
-        lock (pending)
-        {
-            pending.SessionId = box.SessionId;
-            pending.Switch.Start(box.ItemId, index, box.CanSetSubtitle);
-        }
+        StartPending(deviceId, box.SessionId, box.ItemId, index, box.CanSetSubtitle);
 
         Show(deviceId, SyncLayoutBuilder.Message(
             "Subtitles " + SyncLayoutBuilder.Format(offsetMs) + (offsetMs == 0 ? " (original)" : string.Empty) + ". Press play to resume.",
@@ -396,47 +410,131 @@ public sealed class OverlayClientHost : IHostedService
         }
     }
 
-    /// <summary>A playback sample of a device: drives its pending switch to the synced track.</summary>
-    internal async Task OnProgressAsync(string deviceId, string? sessionId, Guid? itemId, bool paused, int? currentSub)
+    /// <summary>
+    /// Starts the switch for a device and its ~400 ms session poll (as JellyXR TV's fast poll): progress reports alone
+    /// come only every ~10 s. Playback events stay an extra input. Replaces a previous switch of the device.
+    /// </summary>
+    private void StartPending(string deviceId, string sessionId, Guid itemId, int index, bool canSet)
     {
-        if (!_pending.TryGetValue(deviceId, out var pending))
-        {
-            return;
-        }
-
-        SwitchDecision d;
-        string target;
+        var pending = new Pending(new PendingSubtitleSwitch(Clock), sessionId);
         lock (pending)
         {
-            d = pending.Switch.OnSample(itemId, paused, currentSub);
-            target = string.IsNullOrEmpty(sessionId) ? pending.SessionId : sessionId;
+            pending.Switch.Start(itemId, index, canSet);
         }
 
-        switch (d.Kind)
+        if (_pending.TryRemove(deviceId, out var old))
         {
-            case SwitchKind.SendSet:
-                _logger.LogDebug("Asking {Device} to switch to subtitle stream {Index}", deviceId, d.Index);
-                try
-                {
-                    await SendCommand(target, new SessionCommand("SetSubtitleStreamIndex", d.Index)).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning("SetSubtitleStreamIndex failed: {Error}", ex.Message);
-                }
+            StopTimer(old);
+        }
 
-                break;
-            case SwitchKind.Done:
-                _logger.LogInformation("{Device} plays the synced subtitle track", deviceId);
-                break;
-            case SwitchKind.GiveUp:
-                _logger.LogInformation("Gave up switching {Device} to the synced track{Hint}", deviceId, d.ShowHint ? ": asking the viewer" : string.Empty);
-                if (d.ShowHint)
-                {
-                    Show(deviceId, SyncLayoutBuilder.Message(PickHintText, busy: false, failed: true));
-                }
+        _pending[deviceId] = pending;
+        var period = TimeSpan.FromMilliseconds(SwitchPollMs);
+        var timer = Clock.CreateTimer(_ => _ = PollAsync(deviceId, pending), null, period, period);
+        Interlocked.Increment(ref _timersRunning);
+        lock (pending)
+        {
+            pending.Timer = timer;
+        }
 
-                break;
+        if (!_pending.TryGetValue(deviceId, out var cur) || !ReferenceEquals(cur, pending))
+        {
+            StopTimer(pending); // ended or replaced before the timer was stored
+        }
+    }
+
+    /// <summary>Timer tick: the device's session as one sample (nothing playing when the session is gone, so the give-up still ends it).</summary>
+    private Task PollAsync(string deviceId, Pending pending)
+    {
+        SessionView? s = null;
+        try
+        {
+            s = FindSession(pending.SessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Session poll for the subtitle switch failed: {Error}", ex.Message);
+        }
+
+        return SampleAsync(deviceId, pending, s?.Id, s?.NowPlayingItemId, s?.IsPaused ?? false, s?.SubtitleStreamIndex);
+    }
+
+    /// <summary>A playback event of a device: drives its pending switch to the synced track.</summary>
+    internal Task OnProgressAsync(string deviceId, string? sessionId, Guid? itemId, bool paused, int? currentSub)
+        => _pending.TryGetValue(deviceId, out var pending)
+            ? SampleAsync(deviceId, pending, sessionId, itemId, paused, currentSub)
+            : Task.CompletedTask;
+
+    private async Task SampleAsync(string deviceId, Pending pending, string? sessionId, Guid? itemId, bool paused, int? currentSub)
+    {
+        try
+        {
+            SwitchDecision d;
+            string target;
+            lock (pending)
+            {
+                d = pending.Switch.OnSample(itemId, paused, currentSub);
+                target = string.IsNullOrEmpty(sessionId) ? pending.SessionId : sessionId;
+            }
+
+            switch (d.Kind)
+            {
+                case SwitchKind.SendSet:
+                    _logger.LogDebug("Asking {Device} to switch to subtitle stream {Index}", deviceId, d.Index);
+                    try
+                    {
+                        await SendCommand(target, new SessionCommand("SetSubtitleStreamIndex", d.Index)).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("SetSubtitleStreamIndex failed: {Error}", ex.Message);
+                    }
+
+                    break;
+                case SwitchKind.Done:
+                    _logger.LogInformation("{Device} plays the synced subtitle track", deviceId);
+                    Finish(deviceId, pending);
+                    break;
+                case SwitchKind.GiveUp:
+                    _logger.LogInformation("Gave up switching {Device} to the synced track{Hint}", deviceId, d.ShowHint ? ": asking the viewer" : string.Empty);
+                    Finish(deviceId, pending);
+                    if (d.ShowHint)
+                    {
+                        Show(deviceId, SyncLayoutBuilder.Message(PickHintText, busy: false, failed: true));
+                    }
+
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Subtitle switch sample on {Device} failed: {Error}", deviceId, ex.Message);
+        }
+    }
+
+    /// <summary>The switch ended (or the plugin stops): stop its timer and drop the device's entries.</summary>
+    private void Finish(string deviceId, Pending pending)
+    {
+        StopTimer(pending);
+        if (_pending.TryRemove(new KeyValuePair<string, Pending>(deviceId, pending)))
+        {
+            _boxes.TryRemove(deviceId, out _);
+            _userOf.TryRemove(deviceId, out _);
+        }
+    }
+
+    private void StopTimer(Pending pending)
+    {
+        ITimer? t;
+        lock (pending)
+        {
+            t = pending.Timer;
+            pending.Timer = null;
+        }
+
+        if (t is not null)
+        {
+            t.Dispose();
+            Interlocked.Decrement(ref _timersRunning);
         }
     }
 
@@ -494,7 +592,8 @@ public sealed class OverlayClientHost : IHostedService
             s.NowPlayingItem?.Id,
             s.PlayState?.SubtitleStreamIndex,
             s.PlayState?.MediaSourceId,
-            ServerCompat.SupportsCommand(s, "SetSubtitleStreamIndex"));
+            ServerCompat.SupportsCommand(s, "SetSubtitleStreamIndex"),
+            s.PlayState?.IsPaused ?? false);
     }
 
     /// <summary>The playing version (media source) when given, as SubSyncController.Find.</summary>
@@ -541,10 +640,13 @@ public sealed class OverlayClientHost : IHostedService
         public volatile bool Applying;
     }
 
-    private sealed class Pending(PendingSubtitleSwitch sw)
+    private sealed class Pending(PendingSubtitleSwitch sw, string sessionId)
     {
         public PendingSubtitleSwitch Switch { get; } = sw;
 
-        public string SessionId { get; set; } = string.Empty;
+        public string SessionId { get; } = sessionId;
+
+        /// <summary>The ~400 ms session poll; null once stopped. Guarded by the instance lock.</summary>
+        public ITimer? Timer { get; set; }
     }
 }

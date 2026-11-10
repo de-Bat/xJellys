@@ -20,7 +20,7 @@ Rules that apply everywhere:
 | `owner` | string | set by the host | The plugin that sent the layout. Any value you send is overwritten. |
 | `focus` | string | `passive` | `passive` (no remote), `interactive` (takes the remote), or `interactive+passthrough` (takes the remote but passes unbound keys on to the player). |
 | `ttlMs` | number | `0` | Auto-close after this many ms. `0` = until closed. |
-| `ttlResetOnKey` | bool | `false` | With `ttlMs` on an interactive layout: every key the layout handles starts the `ttlMs` again (an idle timeout). The app then owns the timeout and reports `closed` with reason `ttl`; the host does not expire the layout. Any other type is rejected. |
+| `ttlResetOnKey` | bool | `false` | With `ttlMs` on an interactive layout: every key the layout handles starts the `ttlMs` again (an idle timeout). The app then owns the timeout and reports `closed` with reason `ttl`; the host keeps only a hard expiry of max(4 x `ttlMs`, 5 min) in case the app never reports. Any other type is rejected. |
 | `dim` | number 0 to 1 | none | Opacity of the flat dim layer behind the layout. |
 | `parent` | string | none | Id of a parent layout. Namespaced like `id`. Closing this layout returns to the parent. |
 | `closeOn` | array | `["stop","itemStart"]` | Triggers that close the layout. Subset of `itemStart`, `pause`, `resume`, `doublePause`, `seek`, `stop`. |
@@ -178,7 +178,7 @@ Long-poll: answers as soon as there are ops after `since`, otherwise after at mo
 - `seq`: pass it as `since` in the next poll. With no ops it equals the `since` you sent.
 - `op` is `show`, `close` or `reset`. `show` carries the validated `layout` (shown again with the same id = replace); `close` carries only `layoutId`.
 - `reset` starts every snapshot: close every window not in this snapshot (the `show` ops that follow, all with the same `seq`). A snapshot is sent for `since=0`, for a `since` above the server's head (server restarted) and for a `since` older than the retained log. On a device that never had a layout, `since=0` waits and then returns `{"seq":0,"ops":[]}`.
-- Layouts with `ttlMs` are closed by the host (a `close` op) when they expire, except `ttlResetOnKey` layouts: the app closes those and reports it.
+- Layouts with `ttlMs` are closed by the host (a `close` op) when they expire, except `ttlResetOnKey` layouts: the app closes those and reports it, and the host closes them only after max(4 x `ttlMs`, 5 min).
 
 ### `POST /JellyTvOverlay/Event`
 

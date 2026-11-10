@@ -7,10 +7,13 @@ namespace Jellyfin.Plugin.JellyTvOverlay.Delivery;
 /// <summary>One delivery op. Op is show, close or reset. A reset (LayoutId empty) starts every snapshot: the app closes everything not shown again by the show ops that follow (all with Seq = head).</summary>
 public sealed record OverlayOp(long Seq, string Op, string LayoutId, JsonObject? Layout);
 
-/// <summary>Per-device ordered op log with snapshot, long-poll and ttl expiry (not for ttlResetOnKey layouts: the app owns their ttl). Thread-safe.</summary>
+/// <summary>Per-device ordered op log with snapshot, long-poll and ttl expiry (ttlResetOnKey layouts: the app owns their ttl, the host keeps a hard expiry of max(4 x ttl, 5 min)). Thread-safe.</summary>
 public sealed class OverlayQueue(TimeProvider clock)
 {
     private const int MaxLog = 200;
+
+    /// <summary>Least hard expiry of a ttlResetOnKey layout.</summary>
+    public const double ResetOnKeyFloorMs = 5 * 60 * 1000;
 
     private readonly ConcurrentDictionary<string, DeviceQueue> _devices = new(StringComparer.Ordinal);
 
@@ -19,8 +22,10 @@ public sealed class OverlayQueue(TimeProvider clock)
         var d = Get(deviceId);
         lock (d.Gate)
         {
-            // ttlResetOnKey: the app restarts the ttl on each key press and reports closed(ttl) itself
-            var expires = l.TtlMs > 0 && !ResetsOnKey(l) ? clock.GetUtcNow().AddMilliseconds(l.TtlMs) : (DateTimeOffset?)null;
+            // ttlResetOnKey: the app restarts the ttl on each key press and reports closed(ttl) itself; the host keeps
+            // only a hard expiry (max(4 x ttl, 5 min)) in case the app never reports
+            var ttl = l.TtlMs > 0 && ResetsOnKey(l) ? Math.Max(l.TtlMs * 4.0, ResetOnKeyFloorMs) : l.TtlMs;
+            var expires = ttl > 0 ? clock.GetUtcNow().AddMilliseconds(ttl) : (DateTimeOffset?)null;
             d.Remove(l.Id);
             d.Order.Add(l.Id);
             d.Shown[l.Id] = new Entry(l, expires);

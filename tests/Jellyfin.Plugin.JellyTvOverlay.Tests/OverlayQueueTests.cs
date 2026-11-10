@@ -97,18 +97,23 @@ public class OverlayQueueTests
         Assert.Null(op.Layout);
     }
 
-    [Fact]
-    public void Ttl_ResetOnKey_LeftToTheApp()
+    [Theory]
+    [InlineData(1000, 300000)]    // floor: 5 min
+    [InlineData(100000, 400000)]  // 4 x ttl
+    public void Ttl_ResetOnKey_LeftToTheApp_WithHardExpiry(int ttlMs, int hardMs)
     {
         var clock = new FakeTimeProvider();
         var q = new OverlayQueue(clock);
-        var l = L("a", 1000);
+        var l = L("a", ttlMs);
         l.Json["ttlResetOnKey"] = true;
         q.Show("d1", l);
-        clock.Advance(TimeSpan.FromMilliseconds(60000));
-        q.Tick();
         // the app restarts the ttl on each key and reports closed(ttl) itself
+        clock.Advance(TimeSpan.FromMilliseconds(hardMs - 1));
+        q.Tick();
         Assert.Single(q.Shown("d1"));
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        q.Tick();
+        Assert.Empty(q.Shown("d1"));
     }
 
     [Fact]

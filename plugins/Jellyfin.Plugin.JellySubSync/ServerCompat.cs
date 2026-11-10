@@ -84,11 +84,13 @@ internal static class ServerCompat
     public static MediaBrowser.Model.Session.GeneralCommand SetSubtitleCommand(string index)
     {
         var cmd = new MediaBrowser.Model.Session.GeneralCommand { Name = MediaBrowser.Model.Session.GeneralCommandType.SetSubtitleStreamIndex };
-        if (typeof(MediaBrowser.Model.Session.GeneralCommand).GetProperty("Arguments")?.GetValue(cmd) is IDictionary<string, string> args)
+        if (typeof(MediaBrowser.Model.Session.GeneralCommand).GetProperty("Arguments")?.GetValue(cmd) is not IDictionary<string, string> { IsReadOnly: false } args)
         {
-            args["Index"] = index;
+            // without its Index the command would switch nothing: fail loudly (the caller logs it)
+            throw new MissingMemberException(typeof(MediaBrowser.Model.Session.GeneralCommand).FullName, "Arguments (settable string dictionary)");
         }
 
+        args["Index"] = index;
         return cmd;
     }
 

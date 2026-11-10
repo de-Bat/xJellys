@@ -23,6 +23,8 @@ public class OverlayClientHostTests
     private int? _sub = 3;
     private bool _canSet = true;
     private int _stillPlayingPolls;
+    private bool _resumed;   // after Stop: the viewer resumed the item
+    private bool _paused;
     private Func<Task<int>> _applyResult = () => Task.FromResult(7);
     private TrackState? _track = new TrackState(true, null, 0, "English (SRT)");
 
@@ -41,9 +43,14 @@ public class OverlayClientHostTests
                     return null;
                 }
 
-                // after Stop: the session still reports the item for a few polls
-                var playing = _commands.Any(c => c.Cmd.Name == "Stop") ? _stillPlayingPolls-- > 0 : true;
-                return new SessionView("s1", playing ? Item : null, _sub, "ms1", _canSet);
+                // after Stop: the session still reports the item for a few polls, then nothing until resumed
+                bool playing;
+                lock (_commands)
+                {
+                    playing = !_commands.Any(c => c.Cmd.Name == "Stop") || _stillPlayingPolls-- > 0 || _resumed;
+                }
+
+                return new SessionView("s1", playing ? Item : null, _sub, "ms1", _canSet, _paused);
             },
             GetTrack = (_, _, _) => _track,
             Apply = (item, source, index, offset, _) =>
@@ -106,6 +113,23 @@ public class OverlayClientHostTests
 
     private static List<string> TextsOf(string json) =>
         Walk(JsonNode.Parse(json)!["root"]).Where(o => o["type"]?.GetValue<string>() == "text").Select(o => o["text"]!.GetValue<string>()).ToList();
+
+    private List<SessionCommand> Sets()
+    {
+        lock (_commands)
+        {
+            return _commands.Where(c => c.Cmd.Name == "SetSubtitleStreamIndex").Select(c => c.Cmd).ToList();
+        }
+    }
+
+    /// <summary>Advances in 100 ms steps: FakeTimeProvider fires a periodic timer at the end time of one Advance.</summary>
+    private void Ms(long ms)
+    {
+        for (var t = 0L; t < ms; t += 100)
+        {
+            _clock.Advance(TimeSpan.FromMilliseconds(Math.Min(100, ms - t)));
+        }
+    }
 
     private string LastText()
     {
@@ -251,12 +275,14 @@ public class OverlayClientHostTests
         Assert.True(_stillPlayingPolls < 0); // waited until the session reported nothing playing
 
         // the viewer resumes from the item page: the player starts on the original track
+        _resumed = true;
         await host.OnProgressAsync("d1", "s1", Item, false, 3);
         _clock.Advance(TimeSpan.FromMilliseconds(2500));
         await host.OnProgressAsync("d1", "s1", Item, false, 3);
         Assert.Equal(("s1", new SessionCommand("SetSubtitleStreamIndex", 7)), _commands[^1]);
         await host.OnProgressAsync("d1", "s1", Item, false, 7);
         Assert.False(host.HasPending("d1"));
+        Assert.Equal(0, host.TimersRunning);
         Assert.DoesNotContain(_commands, c => c.Cmd.Name is not ("Stop" or "SetSubtitleStreamIndex"));
     }
 
@@ -328,6 +354,7 @@ public class OverlayClientHostTests
         await OpenBox(host);
         await RunApply(host, 250);
 
+        _resumed = true;
         await host.OnProgressAsync("d1", "s1", Item, false, 3);
         Assert.Equal("Pick the \"Synced\" track in the player's subtitle menu.", LastText());
         Assert.False(host.HasPending("d1"));
@@ -356,6 +383,153 @@ public class OverlayClientHostTests
         await RunApply(host, 250);
 
         Assert.Null(await host.OnEventAsync(Trigger("doublePause")));
+    }
+
+    [Fact]
+    public async Task Pending_TimerAlone_SettlesRetriesAndHints()
+    {
+        var host = NewHost();
+        await OpenBox(host);
+        await RunApply(host, 250);
+        Assert.Equal(1, host.TimersRunning);
+
+        // no playback events at all: only the ~400 ms session poll
+        _resumed = true;
+        long t = 0;
+        var sentAt = new List<long>();
+        while (t < 30000 && host.HasPending("d1"))
+        {
+            Ms(100);
+            t += 100;
+            await Task.Yield();
+            if (Sets().Count > sentAt.Count)
+            {
+                sentAt.Add(t);
+            }
+        }
+
+        Assert.Equal(3, sentAt.Count);
+        Assert.All(Sets(), c => Assert.Equal(7, c.Index));
+        // first seen playing on the first tick (<= 400 ms), then settle 2500 ms (checked on 400 ms ticks)
+        Assert.InRange(sentAt[0], 2500, 3300);
+        Assert.InRange(sentAt[1] - sentAt[0], 4000, 4400);
+        Assert.InRange(sentAt[2] - sentAt[1], 4000, 4400);
+        Assert.Equal("Pick the \"Synced\" track in the player's subtitle menu.", LastText());
+        Assert.InRange(t - sentAt[2], 4000, 4400);
+        Assert.False(host.HasPending("d1"));
+        Assert.Equal(0, host.TimersRunning);
+    }
+
+    [Fact]
+    public async Task Pending_TimerSeesSwitch_DoneAndTimerDisposed()
+    {
+        var host = NewHost();
+        await OpenBox(host);
+        await RunApply(host, 250);
+
+        _resumed = true;
+        Ms(3400);
+        Assert.Single(Sets());
+        _sub = 7; // the player switched
+        Ms(400);
+        Assert.False(host.HasPending("d1"));
+        Assert.Equal(0, host.TimersRunning);
+        Ms(10000);
+        Assert.Single(Sets());
+    }
+
+    [Fact]
+    public async Task Pending_PausedPlayer_WaitsForResume()
+    {
+        var host = NewHost();
+        await OpenBox(host);
+        await RunApply(host, 250);
+
+        _resumed = true;
+        _paused = true;
+        Ms(10000);
+        Assert.Empty(Sets());
+        _paused = false;
+        Ms(2400);
+        Assert.Empty(Sets());
+        Ms(800);
+        Assert.Single(Sets());
+    }
+
+    [Fact]
+    public async Task Pending_NeverResumed_GiveUpQuietly_OffersAgain()
+    {
+        var host = NewHost();
+        await OpenBox(host);
+        await RunApply(host, 250);
+        var shows = _shows.Count;
+
+        _clock.Advance(TimeSpan.FromMilliseconds(PendingSubtitleSwitch.SubGiveUpMs + 1000)); // nothing plays: one jump is enough
+        Assert.False(host.HasPending("d1"));
+        Assert.Equal(0, host.TimersRunning);
+        Assert.Equal(shows, _shows.Count); // no hint
+        Assert.Empty(Sets());
+        Assert.Equal(Offer, await host.OnEventAsync(Trigger("doublePause")));
+    }
+
+    [Fact]
+    public async Task Stop_DisposesTimers()
+    {
+        var host = NewHost();
+        await OpenBox(host);
+        await RunApply(host, 250);
+        Assert.Equal(1, host.TimersRunning);
+
+        await host.StopAsync(CancellationToken.None);
+        Assert.Equal(0, host.TimersRunning);
+        Assert.False(host.HasPending("d1"));
+    }
+
+    [Fact]
+    public async Task SendFailure_IsCaught_AndRetried()
+    {
+        var host = NewHost();
+        var tries = 0;
+        var inner = host.SendCommand;
+        host.SendCommand = (session, cmd) =>
+        {
+            if (cmd.Name == "SetSubtitleStreamIndex")
+            {
+                tries++;
+                throw new InvalidOperationException("offline");
+            }
+
+            return inner(session, cmd);
+        };
+        await OpenBox(host);
+        await RunApply(host, 250);
+
+        _resumed = true;
+        Ms(7600);
+        Assert.Equal(2, tries);
+        Assert.True(host.HasPending("d1"));
+    }
+
+    [Fact]
+    public void SetSubtitleCommand_Shape()
+    {
+        var cmd = ServerCompat.SetSubtitleCommand("7");
+        Assert.Equal(MediaBrowser.Model.Session.GeneralCommandType.SetSubtitleStreamIndex, cmd.Name);
+        Assert.Equal("7", cmd.Arguments["Index"]);
+    }
+
+    [Fact]
+    public async Task AfterApply_BoxContextCleared()
+    {
+        _applyResult = () => throw new SubSyncException("nope");
+        var host = NewHost();
+        await OpenBox(host);
+        await RunApply(host, 250);
+
+        // the box is gone (replaced by the failure message): a stray apply does nothing
+        Assert.Null(await host.OnEventAsync(Apply(500)));
+        await host.Idle();
+        Assert.Single(_applies);
     }
 
     [Fact]
