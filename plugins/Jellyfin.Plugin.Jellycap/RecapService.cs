@@ -57,9 +57,9 @@ public class RecapService
         return Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Text-only recaps have nothing to say about the watched part, so resume == new.</summary>
+    /// <summary>A new-episode recap does not depend on the start position.</summary>
     private static (RecapMode Mode, TimeSpan Pos) Normalize(RecapMode mode, TimeSpan pos, RecapFormat fmt)
-        => fmt == RecapFormat.Text ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
+        => mode == RecapMode.New ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
 
     public string GetRecapPath(Episode ep, RecapMode mode, TimeSpan pos, RecapFormat fmt)
     {
@@ -74,7 +74,12 @@ public class RecapService
             RecapFormat.Both => $" [both-{lang}]",
             _ => string.Empty
         };
-        var suffix = mode == RecapMode.Resume ? $" (resume m{(int)pos.TotalMinutes})" : string.Empty;
+        var suffix = mode switch
+        {
+            RecapMode.Resume => $" (resume m{(int)pos.TotalMinutes})",
+            RecapMode.ResumeThisEpisode => $" (resume-this m{(int)pos.TotalMinutes})",
+            _ => string.Empty
+        };
         return Path.Combine(RecapDirectory, series, $"{series} - {code} - Recap{format}{suffix}.mp4");
     }
 
@@ -164,7 +169,7 @@ public class RecapService
     private async Task<string?> GenerateAsync(Episode ep, RecapMode mode, TimeSpan pos, RecapFormat fmt, string output)
     {
         var cfg = Plugin.Instance!.Configuration;
-        var clips = await _planner.PlanAsync(ep, mode, pos, fmt, cfg,CancellationToken.None).ConfigureAwait(false);
+        var clips = await _planner.PlanAsync(ep, mode, pos, fmt, cfg, CancellationToken.None).ConfigureAwait(false);
         if (clips.Count == 0)
         {
             _logger.LogInformation("Nothing to recap for {Series} {Episode} ({Mode}, {Format}): no earlier episodes, clips or summaries", ep.SeriesName, ep.Name, mode, fmt);

@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "JellyCap.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.1.1.0: Fix recaps failing on Jellyfin 10.11 and newer (TypeLoadException for Jellyfin.Data.Enums.SortOrder). Episodes are now ordered by the plugin instead of the library query."
+  "changelog": "1.2.0.0: New setting *Recap when resuming an episode* (also per show): previous episodes + this episode so far (default), previous episodes only, or this episode so far only. Text and Both recaps of the watched part quote the episode subtitles (dialogue cards per moment, spoiler free). 1.1.1.0: Fix recaps failing on Jellyfin 10.11 and newer (TypeLoadException for Jellyfin.Data.Enums.SortOrder). Episodes are now ordered by the plugin instead of the library query."
 }

@@ -52,6 +52,7 @@
         ['TranslationUrl', 'Translation server URL (LibreTranslate compatible, empty = no translation)', 'text'],
         ['TranslationApiKey', 'Translation API key (optional)', 'text'],
         ['FontName', 'Text card font (empty = Arial; Hebrew/Arabic need a font that has the glyphs)', 'text'],
+        ['ResumeRecapContent', 'Recap when resuming an episode', 'select:Both=Previous episodes + this episode so far|PreviousEpisodes=Previous episodes only|ThisEpisode=This episode so far only'],
         ['PreviousEpisodes', 'Previous episodes to recap', 'number'],
         ['PreviousClipSeconds', 'Seconds per previous episode', 'number'],
         ['CreditsOffsetSeconds', 'Seconds of credits to skip at end of previous episodes', 'number'],
@@ -70,7 +71,7 @@
           d.className = 'selectContainer';
           d.innerHTML = '<label class="selectLabel" for="' + f[0] + '">' + f[1] + '</label>' +
             '<select id="' + f[0] + '" is="emby-select">' +
-            f[2].substring(7).split('|').map(function (o) { return '<option value="' + o + '">' + o + '</option>'; }).join('') +
+            f[2].substring(7).split('|').map(function (o) { var kv = o.split('='); return '<option value="' + kv[0] + '">' + (kv[1] || kv[0]) + '</option>'; }).join('') +
             '</select>';
         } else {
           d.className = 'inputContainer';
@@ -94,11 +95,15 @@
           var opts = ['Default', 'Video', 'Text', 'Both'].map(function (o) {
             return '<option value="' + o + '"' + (r.Format === o ? ' selected' : '') + '>' + (o === 'Default' ? 'Default format' : o) + '</option>';
           }).join('');
+          var resumeOpts = [['Default', 'Default (global setting)'], ['Both', 'Previous episodes + this episode so far'], ['PreviousEpisodes', 'Previous episodes only'], ['ThisEpisode', 'This episode so far only']].map(function (o) {
+            return '<option value="' + o[0] + '"' + ((r.ResumeContent || 'Default') === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+          }).join('');
           return '<div class="paper-card" data-i="' + i + '" style="padding:.8em 1em;margin-bottom:.8em;border:1px solid rgba(128,128,128,.4);border-radius:6px">' +
             '<div style="display:flex;justify-content:space-between;align-items:center"><strong>' + esc(r.SeriesName) + '</strong>' +
             '<button is="emby-button" type="button" class="raised" data-act="remove"><span>Remove</span></button></div>' +
             '<div class="checkboxContainer"><label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" data-k="Enabled"' + (r.Enabled ? ' checked' : '') + ' /><span>Recap enabled for this show</span></label></div>' +
             '<div class="selectContainer"><label class="selectLabel">Format</label><select is="emby-select" data-k="Format">' + opts + '</select></div>' +
+            '<div class="selectContainer"><label class="selectLabel">When resuming</label><select is="emby-select" data-k="ResumeContent">' + resumeOpts + '</select></div>' +
             '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Seasons (empty = all)</label><input type="text" is="emby-input" data-k="Seasons" value="' + esc(r.Seasons) + '" /></div>' +
             '<div class="inputContainer"><label class="inputLabel inputLabelUnfocused">Episodes (empty = all)</label><input type="text" is="emby-input" data-k="Episodes" value="' + esc(r.Episodes) + '" /></div>' +
             '</div>';
@@ -124,7 +129,7 @@
         if (!sel.value) { return; }
         var exists = rules.some(function (r) { return r.SeriesId === sel.value; });
         if (!exists) {
-          rules.push({ SeriesId: sel.value, SeriesName: sel.options[sel.selectedIndex].text, Enabled: true, Format: 'Default', Seasons: '', Episodes: '' });
+          rules.push({ SeriesId: sel.value, SeriesName: sel.options[sel.selectedIndex].text, Enabled: true, Format: 'Default', ResumeContent: 'Default', Seasons: '', Episodes: '' });
           renderRules();
         }
       });

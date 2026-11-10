@@ -9,6 +9,15 @@ public enum RuleFormat
     Both
 }
 
+public enum RuleResumeContent
+{
+    /// <summary>Use the global resume recap content.</summary>
+    Default,
+    Both,
+    PreviousEpisodes,
+    ThisEpisode
+}
+
 /// <summary>Per TV show override. Series without a rule follow the global settings.</summary>
 public class SeriesRule
 {
@@ -22,6 +31,9 @@ public class SeriesRule
     public bool Enabled { get; set; } = true;
 
     public RuleFormat Format { get; set; } = RuleFormat.Default;
+
+    /// <summary>What a resumed episode's recap covers. Default = global setting.</summary>
+    public RuleResumeContent ResumeContent { get; set; } = RuleResumeContent.Default;
 
     /// <summary>Seasons that get recaps, e.g. "1,3-5" or "2-" (open end). Empty = all. 0 = specials.</summary>
     public string Seasons { get; set; } = string.Empty;

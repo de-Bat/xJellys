@@ -35,6 +35,10 @@ public class TextCardFactory
         return new TextCardSpec(title, string.IsNullOrEmpty(overview) ? null : overview, ReadingSeconds(overview));
     }
 
+    /// <summary>To the card language via the translation server (original text when not set up or failing).</summary>
+    public Task<string> TranslateAsync(string text, PluginConfiguration cfg, CancellationToken ct)
+        => _translator.TranslateAsync(text, cfg, ct);
+
     public static string Shorten(string? text, int max = MaxChars)
     {
         if (string.IsNullOrWhiteSpace(text))
