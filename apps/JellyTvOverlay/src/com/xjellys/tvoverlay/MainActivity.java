@@ -25,7 +25,13 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import com.xjellys.tvoverlay.model.Layout;
 import com.xjellys.tvoverlay.model.ServerUrl;
+import com.xjellys.tvoverlay.render.ImageCache;
+import com.xjellys.tvoverlay.render.OverlayManager;
+import com.xjellys.tvoverlay.render.OverlayWindow;
+
+import java.io.InputStream;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,6 +45,7 @@ public class MainActivity extends Activity {
     private EditText server, user, password;
     private Button overlayBtn, watchBtn, bootBtn, quickBtn;
     private volatile String quickSecret;
+    private OverlayManager overlays;
 
     private final Runnable refresher = new Runnable() {
         @Override public void run() {
@@ -124,7 +131,7 @@ public class MainActivity extends Activity {
         signedInBox.addView(r3);
         TextView help = text(
 "How it works: leave this app and play something in Jellyfin. Overlays from the JellyTvOverlay plugin on"
-                + " your server show over the player. The overlay renderer arrives in a later version.\n"
+                + " your server show over the player. Live overlays arrive in a later version (Test panel shows a sample now).\n"
                 + "Needs the JellyTvOverlay plugin on the server.", 15);
         help.setPadding(0, dp(20), 0, 0);
         signedInBox.addView(help);
@@ -156,6 +163,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         quickSecret = null;
+        if (overlays != null) overlays.closeAll();
         super.onDestroy();
     }
 
@@ -175,7 +183,7 @@ public class MainActivity extends Activity {
                 b.append("  If this box has no such setting, run on a PC:\n  adb shell appops set ")
                     .append(getPackageName()).append(" SYSTEM_ALERT_WINDOW allow\n");
             }
-            b.append("Overlay: the renderer arrives in a later version");
+            b.append("Overlay: Test panel shows a sample; live overlays arrive in a later version");
         } else {
             b.append("Sign in to your Jellyfin server (same user as the Jellyfin app on this box).");
         }
@@ -329,8 +337,36 @@ public class MainActivity extends Activity {
 
     // ---- signed in ----
 
+    /** Shows res/raw/test_layout.json (interactive actor detail with Hebrew text) as a real overlay window. */
     private void testPanel() {
-        Toast.makeText(this, "The overlay renderer arrives in a later version", Toast.LENGTH_LONG).show();
+        if (!Settings.canDrawOverlays(this)) {
+            say("Allow the overlay first (Allow overlay).");
+            return;
+        }
+        try {
+            InputStream in = getResources().openRawResource(R.raw.test_layout);
+            String json = new String(Api.readCapped(in, 256 * 1024), java.nio.charset.StandardCharsets.UTF_8);
+            Layout l = Layout.parse(new JSONObject(json));
+            if (overlays == null) {
+                overlays = new OverlayManager(this, new ImageCache(Api.of(prefs), 24 * 1024 * 1024),
+                    new OverlayWindow.Listener() {
+                        @Override public void onAction(Layout lay, String action, String elementId, JSONObject values) {
+                            Toast.makeText(MainActivity.this, "Action " + action + " on " + elementId, Toast.LENGTH_SHORT).show();
+                        }
+
+                        @Override public void onClosed(Layout lay, String reason) {
+                            say("Test panel closed (" + reason + ")");
+                        }
+
+                        @Override public void onPassthrough(String key) {
+                            // nothing underneath to pass keys to on this screen
+                        }
+                    });
+            }
+            overlays.show(l);
+        } catch (Exception e) {
+            say("Test panel failed: " + e.getMessage());
+        }
     }
 
     private void pickSession() {

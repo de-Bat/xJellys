@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
 import com.xjellys.tvoverlay.model.ServerUrl;
 
 /** Minimal Jellyfin REST client. Every call blocks: run it off the main thread. */
-final class Api {
+public final class Api {
     static final String CLIENT = "JellyTvOverlay";
 
     /** HTTP status other than 2xx. */
@@ -54,7 +54,7 @@ final class Api {
         return new Api(p.server(), p.deviceName(), p.deviceId(), p.token());
     }
 
-    String base() {
+    public String base() {
         return base;
     }
 
@@ -139,6 +139,38 @@ final class Api {
             return read(c.getInputStream());
         } finally {
             c.disconnect();
+        }
+    }
+
+    /**
+     * Image bytes from a server path (token in the header, HTTP gate, no redirects). Null for a non-2xx answer
+     * or a body larger than maxBytes.
+     */
+    public byte[] image(String path, int maxBytes) throws IOException {
+        HttpURLConnection c = open("GET", path, 10000);
+        try {
+            c.setRequestProperty("Accept", "image/*");
+            int code = c.getResponseCode();
+            if (code < 200 || code >= 300) return null;
+            return readCapped(c.getInputStream(), maxBytes);
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    /** Reads at most maxBytes; null (stream closed) when the body is larger. */
+    public static byte[] readCapped(InputStream in, int maxBytes) throws IOException {
+        try {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                if (out.size() + n > maxBytes) return null;
+                out.write(buf, 0, n);
+            }
+            return out.toByteArray();
+        } finally {
+            in.close();
         }
     }
 

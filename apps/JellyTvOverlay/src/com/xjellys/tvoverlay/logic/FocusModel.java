@@ -69,6 +69,18 @@ public final class FocusModel {
         return focused == null ? null : focused.id;
     }
 
+    /** Moves focus to id when it is a focusable node with a rect (e.g. to keep focus after a rebuild). */
+    public boolean setFocused(String id) {
+        if (id == null) return false;
+        for (Node n : order) {
+            if (id.equals(n.id)) {
+                focused = n;
+                return true;
+            }
+        }
+        return false;
+    }
+
     public Result onKey(String key) {
         if (key == null) return NONE;
         String fid = focused();

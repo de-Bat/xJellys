@@ -1,1 +1,53 @@
-{"v":1}
+{
+  "v": 1,
+  "id": "test/actor-detail",
+  "owner": "test",
+  "focus": "interactive",
+  "dim": 0.7,
+  "closeOn": ["stop", "itemStart", "resume"],
+  "root": {
+    "type": "stack",
+    "x": 0.05, "y": 0.06, "w": 0.9, "h": 0.88,
+    "bg": "#F2121820",
+    "radius": 0.02,
+    "children": [
+      {
+        "type": "row", "pad": 0.03, "gap": 0.03,
+        "children": [
+          {
+            "type": "column", "w": 0.34, "gap": 0.015,
+            "children": [
+              { "type": "image", "id": "portrait", "src": "/Items/p42/Images/Primary", "fit": "cover", "round": true, "h": 0.42 },
+              { "type": "text", "text": "עדה דוגמה", "size": 0.05, "bold": true, "maxLines": 2 },
+              { "type": "text", "text": "נולדה ב-12 במרץ 1975, חיפה", "size": 0.025, "color": "#FFB0B8C4" },
+              { "type": "text", "id": "bio", "text": "עדה דוגמה היא שחקנית ישראלית שנולדה וגדלה בחיפה. היא למדה משחק בתל אביב והופיעה לראשונה על הבמה בשנת 1996. מאז שיחקה ביותר משלושים סרטים ובעשרות הפקות תיאטרון, וזכתה בפרס האקדמיה הישראלית לקולנוע פעמיים. בשנים האחרונות היא משחקת גם בסדרות טלוויזיה בינלאומיות, כולל תפקיד ראשי בדרמה הבלשית Northern Lights (2019). היא נשואה ואם לשניים, ומתגוררת כיום בירושלים. בזמנה הפנוי היא מלמדת משחק לבני נוער ומתנדבת בעמותות לקידום אמנות בפריפריה. לחצו למעלה ולמטה כדי לגלול את הטקסט הזה.", "size": 0.026, "focusable": true, "scroll": true, "maxLines": 8 }
+            ]
+          },
+          {
+            "type": "column", "w": 0.63, "gap": 0.02,
+            "children": [
+              { "type": "text", "text": "In your library", "size": 0.035, "bold": true },
+              {
+                "type": "list", "orientation": "horizontal", "h": 0.45, "gap": 0.012,
+                "children": [
+                  { "type": "image", "id": "poster1", "src": "/Items/m1/Images/Primary", "fit": "cover", "radius": 0.008, "focusable": true, "action": "openTitle", "w": 0.3 },
+                  { "type": "image", "id": "poster2", "src": "/Items/m2/Images/Primary", "fit": "cover", "radius": 0.008, "focusable": true, "action": "openTitle", "w": 0.3 },
+                  { "type": "image", "id": "poster3", "src": "/Items/m3/Images/Primary", "fit": "cover", "radius": 0.008, "focusable": true, "action": "openTitle", "w": 0.3 },
+                  { "type": "image", "id": "poster4", "src": "/Items/m4/Images/Primary", "fit": "cover", "radius": 0.008, "focusable": true, "action": "openTitle", "w": 0.3 }
+                ]
+              },
+              {
+                "type": "column", "gap": 0.008,
+                "children": [
+                  { "type": "text", "text": "Example Movie (2019) - 1h 52m", "size": 0.03, "bold": true },
+                  { "type": "text", "text": "A short overview in one or two lines. ◀▶ move between posters, ▲▼ scroll the bio, BACK closes.", "size": 0.024, "maxLines": 2 },
+                  { "type": "button", "label": "Play", "icon": "play", "enabled": false }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

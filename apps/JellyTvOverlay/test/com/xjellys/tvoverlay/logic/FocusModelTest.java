@@ -176,4 +176,15 @@ public class FocusModelTest {
         assertEquals(FocusModel.Kind.NONE, f.onKey("menu").kind);
         assertEquals(FocusModel.Kind.NONE, f.onKey(null).kind);
     }
+
+    @Test
+    public void setFocused_keepsKnownIdOnly() throws Exception {
+        Layout l = lay("interactive", null, "[" + btn("a", "x") + "," + btn("b", "y") + "]");
+        FocusModel f = new FocusModel(l, rects("a", r(0, 0, 10, 10), "b", r(0, 20, 10, 30)));
+        assertTrue(f.setFocused("b"));
+        assertEquals("b", f.focused());
+        assertFalse(f.setFocused("nope"));
+        assertFalse(f.setFocused(null));
+        assertEquals("b", f.focused());
+    }
 }
