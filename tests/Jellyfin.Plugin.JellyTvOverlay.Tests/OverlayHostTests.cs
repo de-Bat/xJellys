@@ -260,7 +260,56 @@ public sealed class OverlayHostTests : IDisposable
 
         Assert.Equal(404, api.DebugShow(Dev, Layout("x"), Anyone).Status);
         Assert.Empty(rt.Queue.Shown(Dev));
+        Assert.False(rt.Dispatcher.IsRegistered(OverlayApi.DebugClient));
         Assert.DoesNotContain(OverlayHost.Registered(), r => r.Id == "debug");
+    }
+
+    [Fact]
+    public void DebugShow_RequiresElevation()
+    {
+        var m = typeof(OverlayController).GetMethod(nameof(OverlayController.DebugShow))!;
+        var auth = m.GetCustomAttributes(true).Where(a => a.GetType().Name == "AuthorizeAttribute").ToList();
+        var policy = Assert.Single(auth).GetType().GetProperty("Policy")!.GetValue(auth[0]);
+        Assert.Equal("RequiresElevation", policy);
+    }
+
+    [Fact]
+    public async Task DebugClient_SwitchedOff_HearsNothing()
+    {
+        var logs = new List<string>();
+        void Log(string m)
+        {
+            lock (logs)
+            {
+                logs.Add(m);
+            }
+        }
+
+        int DebugLogs()
+        {
+            lock (logs)
+            {
+                return logs.Count(l => l.Contains("debug client event", StringComparison.Ordinal));
+            }
+        }
+
+        _cfg.DebugEndpoints = true;
+        var rt = new OverlayRuntime(_clock, Log);
+        Assert.Equal(200, new OverlayApi(rt).DebugShow(Dev, Layout("x"), Anyone).Status);
+        Assert.True(rt.Dispatcher.IsRegistered(OverlayApi.DebugClient));
+
+        await rt.Dispatcher.OnTriggerAsync(new Trigger(TriggerKind.Pause, Dev, "s", "u", Item, 0));
+        for (var i = 0; i < 200 && DebugLogs() == 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(1, DebugLogs()); // on: the trigger is logged
+
+        _cfg.DebugEndpoints = false;
+        await rt.Dispatcher.OnTriggerAsync(new Trigger(TriggerKind.Resume, Dev, "s", "u", Item, 0));
+        await Task.Delay(300);
+        Assert.Equal(1, DebugLogs()); // off: nothing more
     }
 
     [Fact]

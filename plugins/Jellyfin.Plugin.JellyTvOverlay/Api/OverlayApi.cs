@@ -118,7 +118,7 @@ public sealed class OverlayApi(OverlayRuntime rt)
     /// </summary>
     public ApiResult DebugShow(string deviceId, string layoutJson, Func<string, bool> canUse)
     {
-        if (OverlayHost.ConfigSource()?.DebugEndpoints != true)
+        if (!DebugEnabled())
         {
             return new ApiResult(404, null);
         }
@@ -138,7 +138,12 @@ public sealed class OverlayApi(OverlayRuntime rt)
             // logs what the app sends back (actions, closes), so a manual check can see it in the server log
             rt.Dispatcher.Register(DebugClient, "Debug", json =>
             {
-                rt.Log("debug client event: " + json);
+                // switched off later: the client stays registered but hears nothing (no logging, no offers)
+                if (DebugEnabled())
+                {
+                    rt.Log("debug client event: " + json);
+                }
+
                 return Task.FromResult<string?>(null);
             });
         }
@@ -147,6 +152,8 @@ public sealed class OverlayApi(OverlayRuntime rt)
             && rt.Dispatcher.Show(DebugClient, deviceId, layoutJson ?? string.Empty);
         return new ApiResult(200, new JsonObject { ["shown"] = shown }.ToJsonString());
     }
+
+    private static bool DebugEnabled() => OverlayHost.ConfigSource()?.DebugEndpoints == true;
 
     private static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 }

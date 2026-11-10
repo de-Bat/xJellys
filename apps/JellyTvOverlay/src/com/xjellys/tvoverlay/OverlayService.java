@@ -15,6 +15,8 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 
+import java.net.HttpURLConnection;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -24,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.xjellys.tvoverlay.logic.OverlayEvents;
 import com.xjellys.tvoverlay.logic.PlayPosition;
@@ -43,6 +46,7 @@ import com.xjellys.tvoverlay.render.OverlayWindow;
  */
 public class OverlayService extends Service {
     static volatile String status = "Not running";
+    /** For MainActivity's display only; the instance itself checks {@link #destroyed}. */
     static volatile boolean alive;
 
     static final String DENIED = "This box isn't allowed to use the overlay (check the JellyTvOverlay plugin settings)";
@@ -60,6 +64,10 @@ public class OverlayService extends Service {
 
     /** Bumped when the followed device changes, overlays get switched off/on, or the service stops: old poll loops exit. */
     private final AtomicInteger gen = new AtomicInteger();
+    /** This instance's liveness: set first in onDestroy, so a stopped instance never starts or applies anything. */
+    private volatile boolean destroyed;
+    /** The running poll loop (null = none); aborted on restart and destroy. */
+    private volatile PollLoop loop;
     private volatile String device;
     private volatile String sessionId;
     private volatile boolean enabled = true;
@@ -97,6 +105,8 @@ public class OverlayService extends Service {
         follow = new Handler(followThread.getLooper());
         events = Executors.newSingleThreadExecutor(named("jellytvoverlay-events"));
         control = Executors.newSingleThreadExecutor(named("jellytvoverlay-control"));
+        getSystemService(NotificationManager.class).createNotificationChannel(
+            new NotificationChannel(CHANNEL, "JellyTvOverlay", NotificationManager.IMPORTANCE_LOW));
         alive = true;
     }
 
@@ -110,8 +120,11 @@ public class OverlayService extends Service {
 
     @Override
     public void onDestroy() {
+        destroyed = true;
         alive = false;
         gen.incrementAndGet();
+        PollLoop l = loop;
+        if (l != null) l.abort();
         follow.removeCallbacksAndMessages(null);
         followThread.quitSafely();
         events.shutdownNow();
@@ -127,13 +140,14 @@ public class OverlayService extends Service {
 
     private final Runnable tick = new Runnable() {
         @Override public void run() {
+            if (destroyed) return;
             try {
                 followOnce();
             } catch (Exception e) {
                 Log.w(TAG, "session poll failed: " + e.getClass().getSimpleName());
                 setStatus("Can't reach the server (retrying)");
             }
-            if (alive) follow.postDelayed(this, FOLLOW_MS);
+            if (!destroyed) follow.postDelayed(this, FOLLOW_MS);
         }
     };
 
@@ -237,17 +251,23 @@ public class OverlayService extends Service {
     /** Ends the current poll loop, closes every window, and starts a new loop if a device is followed and enabled. */
     private void restart() {
         final int g = gen.incrementAndGet();
+        PollLoop old = loop;
+        loop = null;
+        if (old != null) old.abort();
         pollProblem = null;
+        if (destroyed) return;
         main.post(new Runnable() {
             @Override public void run() {
-                if (!alive) return;
+                if (destroyed) return;
                 overlays.closeAll();
                 preloads.clear();
             }
         });
         String dev = device;
-        if (dev != null && enabled && alive) {
-            Thread t = new Thread(new PollLoop(g, dev), "jellytvoverlay-poll");
+        if (dev != null && enabled) {
+            PollLoop pl = new PollLoop(g, dev);
+            loop = pl;
+            Thread t = new Thread(pl, "jellytvoverlay-poll");
             t.setDaemon(true);
             t.start();
         }
@@ -258,9 +278,12 @@ public class OverlayService extends Service {
         setStatus("Sign-in expired. Open JellyTvOverlay and sign in again.");
         prefs.signOut();
         gen.incrementAndGet();
+        PollLoop l = loop;
+        loop = null;
+        if (l != null) l.abort();
         main.post(new Runnable() {
             @Override public void run() {
-                if (alive) overlays.closeAll();
+                if (!destroyed) overlays.closeAll();
             }
         });
         stopSelf();
@@ -271,6 +294,7 @@ public class OverlayService extends Service {
     private final class PollLoop implements Runnable {
         private final int g;
         private final String dev;
+        private final AtomicReference<HttpURLConnection> conn = new AtomicReference<HttpURLConnection>();
 
         PollLoop(int g, String dev) {
             this.g = g;
@@ -278,7 +302,12 @@ public class OverlayService extends Service {
         }
 
         private boolean current() {
-            return alive && gen.get() == g;
+            return !destroyed && gen.get() == g;
+        }
+
+        /** Ends a blocked poll read now (the loop then sees it is no longer current and exits). */
+        void abort() {
+            Api.abort(conn);
         }
 
         @Override public void run() {
@@ -286,7 +315,7 @@ public class OverlayService extends Service {
             while (current()) {
                 long backoff = 0;
                 try {
-                    JSONObject r = api.poll(dev, since);
+                    JSONObject r = api.poll(dev, since, conn);
                     if (!current()) break;
                     final PollPlan plan = PollPlan.of(r, since);
                     since = plan.seq;
@@ -335,7 +364,7 @@ public class OverlayService extends Service {
 
     /** Main thread: one Poll response, in order. Stale plans (device changed meanwhile) are dropped. */
     private void apply(PollPlan plan, int g) {
-        if (!alive || gen.get() != g) return;
+        if (destroyed || gen.get() != g) return;
         for (PollPlan.Step st : plan.steps) {
             switch (st.kind) {
                 case RESET:
@@ -449,15 +478,13 @@ public class OverlayService extends Service {
 
     private synchronized void setStatus(String s) {
         if (s.equals(status)) return;
+        if (destroyed) return;
         status = s;
-        if (!alive) return;
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.notify(1, notification(s));
     }
 
     private Notification notification(String text) {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "JellyTvOverlay", NotificationManager.IMPORTANCE_LOW));
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)

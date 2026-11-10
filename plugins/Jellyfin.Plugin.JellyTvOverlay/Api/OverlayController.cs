@@ -42,24 +42,13 @@ public sealed class OverlayController : ControllerBase
     [HttpPost("Event")]
     public async Task<ActionResult> Event()
     {
-        if (Request.ContentLength is > MaxEventBytes)
+        var body = await ReadBoundedAsync(MaxEventBytes).ConfigureAwait(false);
+        if (body is null)
         {
             return StatusCode(StatusCodes.Status413PayloadTooLarge);
         }
 
-        var buffer = new char[MaxEventBytes + 1];
-        int read;
-        using (var reader = new StreamReader(Request.Body, Encoding.UTF8))
-        {
-            read = await reader.ReadBlockAsync(buffer.AsMemory(), HttpContext.RequestAborted).ConfigureAwait(false);
-        }
-
-        if (read > MaxEventBytes)
-        {
-            return StatusCode(StatusCodes.Status413PayloadTooLarge);
-        }
-
-        return ToResult(await _api.EventAsync(new string(buffer, 0, read), CanUse).ConfigureAwait(false));
+        return ToResult(await _api.EventAsync(body, CanUse).ConfigureAwait(false));
     }
 
     /// <summary>The app is alive on the device: <c>{"enabled":bool,"protocol":1}</c>.</summary>
@@ -76,13 +65,12 @@ public sealed class OverlayController : ControllerBase
             return NotFound();
         }
 
-        if (Request.ContentLength is > MaxDebugLayoutBytes)
+        var body = await ReadBoundedAsync(MaxDebugLayoutBytes).ConfigureAwait(false);
+        if (body is null)
         {
             return StatusCode(StatusCodes.Status413PayloadTooLarge);
         }
 
-        using var reader = new StreamReader(Request.Body, Encoding.UTF8);
-        var body = await reader.ReadToEndAsync(HttpContext.RequestAborted).ConfigureAwait(false);
         return ToResult(_api.DebugShow(deviceId ?? string.Empty, body, CanUse));
     }
 
@@ -112,6 +100,24 @@ public sealed class OverlayController : ControllerBase
                 Enabled = !off.Contains(id, StringComparer.Ordinal),
             };
         }).ToList();
+    }
+
+    /// <summary>The request body, or null when it is larger than <paramref name="max"/> (by Content-Length or as read).</summary>
+    private async Task<string?> ReadBoundedAsync(int max)
+    {
+        if (Request.ContentLength is { } len && len > max)
+        {
+            return null;
+        }
+
+        var buffer = new char[max + 1];
+        int read;
+        using (var reader = new StreamReader(Request.Body, Encoding.UTF8))
+        {
+            read = await reader.ReadBlockAsync(buffer.AsMemory(), HttpContext.RequestAborted).ConfigureAwait(false);
+        }
+
+        return read > max ? null : new string(buffer, 0, read);
     }
 
     private bool CanUse(string deviceId)

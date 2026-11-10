@@ -14,6 +14,7 @@ import java.net.InetAddress;
 import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.util.concurrent.atomic.AtomicReference;
 import java.nio.charset.StandardCharsets;
 
 import com.xjellys.tvoverlay.model.ServerUrl;
@@ -37,6 +38,19 @@ public final class Api {
             this.code = code;
         }
     }
+
+    /** Marker in an aborted handle. */
+    private static final HttpURLConnection ABORTED = new HttpURLConnection(null) {
+        @Override public void disconnect() {
+        }
+
+        @Override public boolean usingProxy() {
+            return false;
+        }
+
+        @Override public void connect() {
+        }
+    };
 
     private final String base;
     private final String deviceName;
@@ -93,8 +107,14 @@ public final class Api {
     }
 
     private byte[] call(String method, String path, String jsonBody, int readMs) throws IOException {
+        return call(method, path, jsonBody, readMs, null);
+    }
+
+    /** handle (may be null) holds the open connection, so another thread can disconnect() a blocked read. */
+    private byte[] call(String method, String path, String jsonBody, int readMs,
+                        AtomicReference<HttpURLConnection> handle) throws IOException {
         try {
-            return callOnce(method, path, jsonBody, readMs);
+            return callOnce(method, path, jsonBody, readMs, handle);
         } catch (HttpError e) {
             throw e;
         } catch (IOException e) {
@@ -103,12 +123,19 @@ public final class Api {
             boolean stale = e instanceof java.io.EOFException
                 || (e instanceof java.net.SocketException && !(e instanceof java.net.ConnectException));
             if (!"GET".equals(method) || !stale) throw e;
-            return callOnce(method, path, jsonBody, readMs);
+            if (handle != null && handle.get() == ABORTED) throw e;
+            return callOnce(method, path, jsonBody, readMs, handle);
         }
     }
 
-    private byte[] callOnce(String method, String path, String jsonBody, int readMs) throws IOException {
+    private byte[] callOnce(String method, String path, String jsonBody, int readMs,
+                            AtomicReference<HttpURLConnection> handle) throws IOException {
         HttpURLConnection c = open(method, path, readMs);
+        if (handle != null && !handle.compareAndSet(null, c)) {
+            // aborted before the request went out
+            c.disconnect();
+            throw new IOException("aborted");
+        }
         try {
             if (jsonBody != null) {
                 c.setDoOutput(true);
@@ -138,6 +165,7 @@ public final class Api {
             if (code == 204) return new byte[0];
             return read(c.getInputStream());
         } finally {
+            if (handle != null) handle.compareAndSet(c, null);
             c.disconnect();
         }
     }
@@ -241,9 +269,26 @@ public final class Api {
 
     /** Long-poll for overlay ops after {@code since}: {"seq":n,"ops":[...]}. The server holds up to 25 s. */
     JSONObject poll(String deviceId, long since) throws Exception {
-        String t = new String(call("GET", "/JellyTvOverlay/Poll?deviceId=" + enc(deviceId) + "&since=" + since, null, 35000),
+        return poll(deviceId, since, null);
+    }
+
+    /** As poll(); {@link #abort(AtomicReference)} on the handle from another thread ends a blocked poll at once. */
+    JSONObject poll(String deviceId, long since, AtomicReference<HttpURLConnection> handle) throws Exception {
+        String t = new String(call("GET", "/JellyTvOverlay/Poll?deviceId=" + enc(deviceId) + "&since=" + since, null, 35000, handle),
             StandardCharsets.UTF_8);
         return t.trim().isEmpty() ? new JSONObject().put("seq", since).put("ops", new JSONArray()) : new JSONObject(t);
+    }
+
+    /** Disconnects the call using this handle (its read throws) and makes later calls with it fail at once. */
+    static void abort(AtomicReference<HttpURLConnection> handle) {
+        HttpURLConnection c = handle.getAndSet(ABORTED);
+        if (c != null && c != ABORTED) {
+            try {
+                c.disconnect();
+            } catch (RuntimeException ignored) {
+                // already closed
+            }
+        }
     }
 
     /** App event (action or closed) for a layout shown on the device. */
