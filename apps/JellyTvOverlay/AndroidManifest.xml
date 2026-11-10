@@ -34,6 +34,10 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".OverlayService"
+            android:exported="false" />
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

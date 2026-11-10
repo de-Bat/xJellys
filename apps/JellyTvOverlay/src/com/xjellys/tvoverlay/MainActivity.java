@@ -36,14 +36,14 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Sign-in and settings. The overlay service arrives in a later task. */
+/** Sign-in and settings. The work happens in {@link OverlayService}. */
 public class MainActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private Prefs prefs;
     private TextView status, code;
     private LinearLayout signInBox, signedInBox;
     private EditText server, user, password;
-    private Button overlayBtn, watchBtn, bootBtn, quickBtn;
+    private Button overlayBtn, watchBtn, bootBtn, quickBtn, runBtn;
     private volatile String quickSecret;
     private OverlayManager overlays;
     private ImageCache overlayImages;
@@ -126,7 +126,11 @@ public class MainActivity extends Activity {
                 refresh();
             }
         });
+        runBtn = button("Stop", new View.OnClickListener() {
+            @Override public void onClick(View v) { setRunning(!prefs.running()); }
+        });
         r3.addView(watchBtn);
+        r3.addView(runBtn);
         r3.addView(bootBtn);
         r3.addView(button("Sign out", new View.OnClickListener() {
             @Override public void onClick(View v) { signOut(); }
@@ -134,7 +138,7 @@ public class MainActivity extends Activity {
         signedInBox.addView(r3);
         TextView help = text(
 "How it works: leave this app and play something in Jellyfin. Overlays from the JellyTvOverlay plugin on"
-                + " your server show over the player. Live overlays arrive in a later version (Test panel shows a sample now).\n"
+                + " your server show over the player (Test panel shows a local sample).\n"
                 + "Needs the JellyTvOverlay plugin on the server.", 15);
         help.setPadding(0, dp(20), 0, 0);
         signedInBox.addView(help);
@@ -154,6 +158,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        startServiceIfReady();
         ui.post(refresher);
     }
 
@@ -186,7 +191,7 @@ public class MainActivity extends Activity {
                 b.append("  If this box has no such setting, run on a PC:\n  adb shell appops set ")
                     .append(getPackageName()).append(" SYSTEM_ALERT_WINDOW allow\n");
             }
-            b.append("Overlay: Test panel shows a sample; live overlays arrive in a later version");
+            b.append("Overlay: ").append(OverlayService.alive ? OverlayService.status : (prefs.running() ? "starting" : "stopped"));
         } else {
             b.append("Sign in to your Jellyfin server (same user as the Jellyfin app on this box).");
         }
@@ -195,6 +200,24 @@ public class MainActivity extends Activity {
         overlayBtn.setVisibility(overlay ? View.GONE : View.VISIBLE);
         watchBtn.setText("Watch: " + (prefs.watch().isEmpty() ? "automatic" : prefs.watchLabel()));
         bootBtn.setText("Start on boot: " + (prefs.startOnBoot() ? "on" : "off"));
+        runBtn.setText(prefs.running() ? "Stop" : "Start");
+    }
+
+    private void startServiceIfReady() {
+        if (prefs.signedIn() && prefs.running() && Settings.canDrawOverlays(this) && !OverlayService.alive) {
+            OverlayService.start(this);
+        }
+    }
+
+    private void setRunning(boolean run) {
+        prefs.setRunning(run);
+        if (run) {
+            startServiceIfReady();
+            if (!Settings.canDrawOverlays(this)) say("Allow the overlay first (Allow overlay).");
+        } else {
+            stopService(new Intent(this, OverlayService.class));
+        }
+        refresh();
     }
 
     // ---- sign in ----
@@ -322,6 +345,7 @@ public class MainActivity extends Activity {
             @Override public void run() {
                 password.setText("");
                 code.setVisibility(View.GONE);
+                startServiceIfReady();
                 refresh();
                 (Settings.canDrawOverlays(MainActivity.this) ? watchBtn : overlayBtn).requestFocus();
             }
@@ -334,6 +358,7 @@ public class MainActivity extends Activity {
             @Override public void run() { api.signOut(); }
         }).start();
         prefs.signOut();
+        stopService(new Intent(this, OverlayService.class));
         dropOverlays();
         refresh();
         quickBtn.requestFocus();

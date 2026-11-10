@@ -182,6 +182,10 @@ Body: an app event (see Events). `204` on success, `400` for malformed JSON or m
 
 Send every 30 s while the app runs. Returns `{"enabled":bool,"protocol":1}`. `enabled` is `false` when the plugin or this device is switched off in the settings; then show nothing. A device counts as having the app (`OverlayHost.HasApp`) for 90 s after its last heartbeat.
 
+### `POST /JellyTvOverlay/Debug/Show?deviceId=<id>` (debug aid)
+
+Administrators only, and `404` unless `DebugEndpoints` is switched on in the plugin settings (default off). Body: a layout JSON; it is shown on the device as client `debug` (ids become `debug/<id>`), through the same validation and rules as `OverlayHost.Show`. Returns `{"shown":bool}`; `400` without `deviceId`, `403` when the device has no session. Events for these layouts are written to the server log.
+
 ### `GET /JellyTvOverlay/Clients`, `GET /JellyTvOverlay/Devices`
 
 Administrators only; used by the settings page (registered client plugins; devices with a fresh heartbeat or switched off).

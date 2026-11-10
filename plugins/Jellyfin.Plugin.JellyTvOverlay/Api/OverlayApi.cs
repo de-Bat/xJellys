@@ -109,5 +109,44 @@ public sealed class OverlayApi(OverlayRuntime rt)
         return new ApiResult(204, null);
     }
 
+    /// <summary>Client id the debug endpoint shows as (layout ids become "debug/...").</summary>
+    public const string DebugClient = "debug";
+
+    /// <summary>
+    /// Debug aid behind <c>POST JellyTvOverlay/Debug/Show</c>: 404 unless <c>DebugEndpoints</c> is on; then shows the layout
+    /// as client "debug" (registered on first use; its handler only logs the events it gets). <c>{"shown":bool}</c>.
+    /// </summary>
+    public ApiResult DebugShow(string deviceId, string layoutJson, Func<string, bool> canUse)
+    {
+        if (OverlayHost.ConfigSource()?.DebugEndpoints != true)
+        {
+            return new ApiResult(404, null);
+        }
+
+        if (string.IsNullOrEmpty(deviceId))
+        {
+            return new ApiResult(400, null);
+        }
+
+        if (!canUse(deviceId))
+        {
+            return new ApiResult(403, null);
+        }
+
+        if (!rt.Dispatcher.IsRegistered(DebugClient))
+        {
+            // logs what the app sends back (actions, closes), so a manual check can see it in the server log
+            rt.Dispatcher.Register(DebugClient, "Debug", json =>
+            {
+                rt.Log("debug client event: " + json);
+                return Task.FromResult<string?>(null);
+            });
+        }
+
+        var shown = OverlayHost.IsEnabled() && OverlayHost.IsDeviceEnabled(deviceId)
+            && rt.Dispatcher.Show(DebugClient, deviceId, layoutJson ?? string.Empty);
+        return new ApiResult(200, new JsonObject { ["shown"] = shown }.ToJsonString());
+    }
+
     private static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 }

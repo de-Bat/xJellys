@@ -261,6 +261,11 @@ public final class Api {
         call("POST", "/Sessions/" + enc(sessionId) + "/Playing/" + enc(command), null);
     }
 
+    /** Remote control: seek the session's player to an absolute position (100 ns ticks). */
+    void seek(String sessionId, long positionTicks) throws Exception {
+        call("POST", "/Sessions/" + enc(sessionId) + "/Playing/Seek?seekPositionTicks=" + Math.max(0, positionTicks), null);
+    }
+
     /** Remote control: stop playback on the session. */
     void stop(String sessionId) throws Exception {
         call("POST", "/Sessions/" + enc(sessionId) + "/Playing/Stop", null);

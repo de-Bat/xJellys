@@ -56,6 +56,8 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         return true;
     }
 
+    public bool IsRegistered(string clientId) => _clients.ContainsKey(clientId);
+
     public async Task OnTriggerAsync(Trigger t)
     {
         var name = TriggerName(t.Kind);

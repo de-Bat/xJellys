@@ -17,6 +17,7 @@ public sealed class OverlayController : ControllerBase
     private const string UserIdClaim = "Jellyfin-UserId";
     private const string AdminRole = "Administrator";
     private const int MaxEventBytes = 64 * 1024;
+    private const int MaxDebugLayoutBytes = 1024 * 1024;
 
     private readonly OverlayApi _api;
     private readonly OverlayRuntime _rt;
@@ -64,6 +65,26 @@ public sealed class OverlayController : ControllerBase
     /// <summary>The app is alive on the device: <c>{"enabled":bool,"protocol":1}</c>.</summary>
     [HttpPost("Heartbeat")]
     public ActionResult Heartbeat([FromQuery] string? deviceId) => ToResult(_api.Heartbeat(deviceId ?? string.Empty, CanUse));
+
+    /// <summary>Debug aid: shows the body layout as client "debug" on the device. Admins only; 404 unless DebugEndpoints is on.</summary>
+    [HttpPost("Debug/Show")]
+    [Authorize(Policy = "RequiresElevation")]
+    public async Task<ActionResult> DebugShow([FromQuery] string? deviceId)
+    {
+        if (Plugin.Instance?.Configuration.DebugEndpoints != true)
+        {
+            return NotFound();
+        }
+
+        if (Request.ContentLength is > MaxDebugLayoutBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
+        }
+
+        using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+        var body = await reader.ReadToEndAsync(HttpContext.RequestAborted).ConfigureAwait(false);
+        return ToResult(_api.DebugShow(deviceId ?? string.Empty, body, CanUse));
+    }
 
     /// <summary>Registered client plugins (settings page).</summary>
     [HttpGet("Clients")]

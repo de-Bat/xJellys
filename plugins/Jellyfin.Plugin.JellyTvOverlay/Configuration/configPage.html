@@ -10,6 +10,11 @@
           <input id="Enabled" name="Enabled" type="checkbox" is="emby-checkbox" />
           <span>Enabled</span>
         </label>
+        <label class="checkboxContainer">
+          <input id="DebugEndpoints" name="DebugEndpoints" type="checkbox" is="emby-checkbox" />
+          <span>Debug endpoints</span>
+        </label>
+        <div class="fieldDescription">Debug aid for administrators: enables POST JellyTvOverlay/Debug/Show?deviceId=... (body = layout JSON), shown as owner "debug". Leave off normally.</div>
 
         <h2>Client plugins</h2>
         <div class="fieldDescription">Plugins that draw overlays through JellyTvOverlay.</div>
@@ -75,6 +80,7 @@
         Dashboard.showLoadingMsg();
         ApiClient.getPluginConfiguration(guid).then(function (c) {
           page.querySelector('#Enabled').checked = c.Enabled !== false;
+          page.querySelector('#DebugEndpoints').checked = c.DebugEndpoints === true;
           return Promise.all([loadClients(), loadDevices()]);
         }).finally(function () {
           Dashboard.hideLoadingMsg();
@@ -85,6 +91,7 @@
         Dashboard.showLoadingMsg();
         ApiClient.getPluginConfiguration(guid).then(function (c) {
           c.Enabled = page.querySelector('#Enabled').checked;
+          c.DebugEndpoints = page.querySelector('#DebugEndpoints').checked;
           var off = (c.DisabledDevices || []).slice();
           page.querySelectorAll('.deviceSwitch').forEach(function (s) {
             var id = s.getAttribute('data-device');

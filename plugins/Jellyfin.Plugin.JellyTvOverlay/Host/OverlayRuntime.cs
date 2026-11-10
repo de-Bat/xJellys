@@ -86,7 +86,8 @@ public sealed class OverlayRuntime
         return triggers;
     }
 
-    private void Log(string message)
+    /// <summary>Plugin log line (prefixed "JellyTvOverlay: "); never throws.</summary>
+    public void Log(string message)
     {
         try
         {

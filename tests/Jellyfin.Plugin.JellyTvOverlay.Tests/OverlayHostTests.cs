@@ -250,4 +250,41 @@ public sealed class OverlayHostTests : IDisposable
         Assert.Equal(TriggerKind.ItemStart, again.Kind);
         Assert.Equal(Alice.ToString("N"), again.UserId);
     }
+
+    [Fact]
+    public void DebugShow_Off_404_NothingShown()
+    {
+        var rt = Runtime();
+        var api = new OverlayApi(rt);
+        Assert.False(_cfg.DebugEndpoints); // default off
+
+        Assert.Equal(404, api.DebugShow(Dev, Layout("x"), Anyone).Status);
+        Assert.Empty(rt.Queue.Shown(Dev));
+        Assert.DoesNotContain(OverlayHost.Registered(), r => r.Id == "debug");
+    }
+
+    [Fact]
+    public void DebugShow_On_ShowsAsDebugOwner()
+    {
+        _cfg.DebugEndpoints = true;
+        var rt = Runtime();
+        var api = new OverlayApi(rt);
+
+        var r = api.DebugShow(Dev, Layout("x"), Anyone);
+        Assert.Equal(200, r.Status);
+        Assert.True(JsonNode.Parse(r.Json!)!["shown"]!.GetValue<bool>());
+        Assert.Equal(new[] { "debug/x" }, rt.Queue.Shown(Dev).Select(l => l.Id));
+
+        // invalid layout: not shown, still 200 with shown:false
+        var bad = api.DebugShow(Dev, "{\"v\":1}", Anyone);
+        Assert.Equal(200, bad.Status);
+        Assert.False(JsonNode.Parse(bad.Json!)!["shown"]!.GetValue<bool>());
+
+        Assert.Equal(400, api.DebugShow(string.Empty, Layout("x"), Anyone).Status);
+        Assert.Equal(403, api.DebugShow(Dev, Layout("y"), _ => false).Status);
+
+        // switched-off plugin: nothing shown
+        _cfg.Enabled = false;
+        Assert.False(JsonNode.Parse(api.DebugShow(Dev, Layout("z"), Anyone).Json!)!["shown"]!.GetValue<bool>());
+    }
 }
