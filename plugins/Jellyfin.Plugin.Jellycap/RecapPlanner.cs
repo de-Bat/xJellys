@@ -60,7 +60,7 @@ public class RecapPlanner
         var all = GetSeriesEpisodes(episode);
         var idx = IndexOf(all, episode);
 
-        if (idx > 0 && cfg.PreviousEpisodes > 0)
+        if (mode != RecapMode.ResumeThisEpisode && idx > 0 && cfg.PreviousEpisodes > 0)
         {
             var isSpecial = (episode.ParentIndexNumber ?? 1) == 0;
             var previous = all.Take(idx)
@@ -96,7 +96,7 @@ public class RecapPlanner
             }
         }
 
-        if (mode == RecapMode.Resume && withVideo && !string.IsNullOrEmpty(episode.Path) && File.Exists(episode.Path))
+        if (mode is RecapMode.Resume or RecapMode.ResumeThisEpisode && withVideo && !string.IsNullOrEmpty(episode.Path) && File.Exists(episode.Path))
         {
             var watched = WatchedPartClips(episode.Path, resumePosition, cfg).ToList();
             if (watched.Count > 0)

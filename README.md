@@ -44,6 +44,7 @@ Plays a recap before an episode on **Android TV** (any remote-controllable clien
 
 - **New episode** → recap = tail of the previous N episodes (credits skipped).
 - **Resumed episode** → previous-episode recap + clips spread over the part of this episode already watched, ending at the resume point.
+- *Recap when resuming an episode* (global, overridable per show as *When resuming*): `Previous episodes + this episode so far` (default) | `Previous episodes only` (same recap as a fresh start, then the episode resumes at its position) | `This episode so far only`. The this-episode part is video clips, so a **Text** recap set to *this episode only* has nothing to show and is skipped.
 
 Android TV cannot show plugin UI, so Jellycap builds a real video with ffmpeg and tells the TV session to play it, then returns to the episode (at the resume position).
 

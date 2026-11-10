@@ -37,6 +37,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Font for text cards. Must exist on the server and cover the language (e.g. "DejaVu Sans" for Hebrew on Linux). Empty = Arial.</summary>
     public string FontName { get; set; } = string.Empty;
 
+    /// <summary>Resumed episode: recap previous episodes, the watched part of this episode, or both. A series rule can override it.</summary>
+    public ResumeContent ResumeRecapContent { get; set; } = ResumeContent.Both;
+
     public int PreviousEpisodes { get; set; } = 2;
 
     public int PreviousClipSeconds { get; set; } = 30;

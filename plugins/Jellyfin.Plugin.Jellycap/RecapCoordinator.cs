@@ -143,7 +143,8 @@ public sealed class RecapCoordinator : IHostedService
         }
         else if (pos.TotalSeconds >= cfg.ResumeMinSeconds)
         {
-            mode = RecapMode.Resume;
+            // startTicks keeps the resume position even when only previous episodes are recapped
+            mode = decision.ResumeMode;
         }
         else
         {
@@ -280,8 +281,8 @@ public sealed class RecapCoordinator : IHostedService
             var d = RecapRules.Decide(episode.SeriesId, episode.ParentIndexNumber, episode.IndexNumber, cfg);
             if (d.Allowed && VideoFormat(d.Format, companion) is { } f)
             {
-                _logger.LogInformation("Pre-building resume recap for {Episode} at {Pos}", episode.Name, pos);
-                _ = _recaps.EnsureRecapFileAsync(episode, RecapMode.Resume, pos, f);
+                _logger.LogInformation("Pre-building resume recap ({Content}) for {Episode} at {Pos}", d.ResumeContent, episode.Name, pos);
+                _ = _recaps.EnsureRecapFileAsync(episode, d.ResumeMode, pos, f);
             }
         }
     }

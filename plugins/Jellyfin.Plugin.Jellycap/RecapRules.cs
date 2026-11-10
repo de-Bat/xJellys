@@ -5,7 +5,16 @@ namespace Jellyfin.Plugin.Jellycap;
 /// <summary>Decides whether an episode gets a recap and in which format.</summary>
 public static class RecapRules
 {
-    public readonly record struct Decision(bool Allowed, RecapFormat Format);
+    public readonly record struct Decision(bool Allowed, RecapFormat Format, ResumeContent ResumeContent)
+    {
+        /// <summary>Mode for a resumed episode, from what its recap should cover.</summary>
+        public RecapMode ResumeMode => ResumeContent switch
+        {
+            ResumeContent.PreviousEpisodes => RecapMode.New,
+            ResumeContent.ThisEpisode => RecapMode.ResumeThisEpisode,
+            _ => RecapMode.Resume
+        };
+    }
 
     public static Decision Decide(Guid seriesId, int? season, int? episode, PluginConfiguration cfg)
     {
@@ -15,7 +24,7 @@ public static class RecapRules
 
         if (rule is null)
         {
-            return new Decision(!cfg.OnlyListedSeries, cfg.RecapFormat);
+            return new Decision(!cfg.OnlyListedSeries, cfg.RecapFormat, cfg.ResumeRecapContent);
         }
 
         var format = rule.Format switch
@@ -26,8 +35,16 @@ public static class RecapRules
             _ => cfg.RecapFormat
         };
 
+        var content = rule.ResumeContent switch
+        {
+            RuleResumeContent.Both => ResumeContent.Both,
+            RuleResumeContent.PreviousEpisodes => ResumeContent.PreviousEpisodes,
+            RuleResumeContent.ThisEpisode => ResumeContent.ThisEpisode,
+            _ => cfg.ResumeRecapContent
+        };
+
         var allowed = rule.Enabled && InSpec(rule.Seasons, season) && InSpec(rule.Episodes, episode);
-        return new Decision(allowed, format);
+        return new Decision(allowed, format, content);
     }
 
     /// <summary>"1,3-5,8-" style list. Empty/blank = everything. Unparsable tokens are ignored.</summary>

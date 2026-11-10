@@ -6,7 +6,23 @@ public enum RecapMode
     New,
 
     /// <summary>Episode resumed mid-way: recap previous episodes and the part of this episode already watched.</summary>
-    Resume
+    Resume,
+
+    /// <summary>Episode resumed mid-way: recap only the part of this episode already watched.</summary>
+    ResumeThisEpisode
+}
+
+/// <summary>What a resumed episode's recap covers.</summary>
+public enum ResumeContent
+{
+    /// <summary>Previous episodes, then the watched part of this episode.</summary>
+    Both,
+
+    /// <summary>Previous episodes only (same recap as starting the episode from the beginning).</summary>
+    PreviousEpisodes,
+
+    /// <summary>Only the watched part of this episode, up to the resume position.</summary>
+    ThisEpisode
 }
 
 public enum RecapFormat
