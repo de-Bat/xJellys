@@ -107,6 +107,45 @@ public class LayoutTest {
     }
 
     @Test
+    public void keys_invalidBindingsDropped() throws Exception {
+        Layout l = p("{\"v\":1,\"id\":\"a\",\"keys\":{"
+                + "\"ok\":{\"op\":\"action\"},"
+                + "\"left\":{\"op\":\"step\",\"by\":5},"
+                + "\"right\":{\"op\":\"step\",\"target\":\"v\",\"by\":1e999},"
+                + "\"up\":{\"op\":\"action\",\"action\":\"u\"},"
+                + "\"menu\":{\"op\":\"action\",\"action\":\"m\"}},"
+                + "\"root\":{\"type\":\"value\",\"id\":\"v\"}}");
+        assertNull(l.keys.get("ok"));
+        assertNull(l.keys.get("left"));
+        assertNull(l.keys.get("right"));
+        assertNull(l.keys.get("menu"));
+        assertEquals("u", l.keys.get("up").action);
+        assertEquals(1, l.keys.size());
+    }
+
+    @Test
+    public void floats_nonFiniteAfterCast_useDefault() throws Exception {
+        Node n = p("{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"row\",\"x\":1e300,\"pad\":1e300,\"size\":1e300}}").root;
+        assertTrue(Float.isNaN(n.x));
+        assertEquals(0f, n.pad, 0f);
+        assertEquals(0.03f, n.size(), 1e-6f);
+    }
+
+    @Test
+    public void decimals_clamped() throws Exception {
+        assertEquals(6, p("{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"value\",\"decimals\":99}}").root.decimals());
+        assertEquals(0, p("{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"value\",\"decimals\":-3}}").root.decimals());
+    }
+
+    @Test
+    public void color_rejectsNonHexChars() throws Exception {
+        assertNull(Node.parseColor("#+12345"));
+        assertNull(Node.parseColor("#-1234567"));
+        assertNull(Node.parseColor("#12345g"));
+        assertEquals(Integer.valueOf(0xFF112233), Node.parseColor("#112233"));
+    }
+
+    @Test
     public void parse_preload_nested() throws Exception {
         Layout l = p("{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"row\"},\"preload\":["
                 + "{\"v\":1,\"id\":\"b\",\"root\":{\"type\":\"row\"},\"preload\":[{\"v\":1,\"id\":\"c\",\"root\":{\"type\":\"row\"}}]},"

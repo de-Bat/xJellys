@@ -24,6 +24,9 @@ public final class Layout {
     public List<Layout> preload = new ArrayList<Layout>();
     public Node root;
 
+    private static final List<String> KEY_NAMES =
+            java.util.Arrays.asList("left", "right", "up", "down", "ok", "play", "back");
+
     private Layout() {
     }
 
@@ -59,13 +62,18 @@ public final class Layout {
             Iterator<String> it = keys.keys();
             while (it.hasNext()) {
                 String k = it.next();
+                if (!KEY_NAMES.contains(k)) continue;
                 JSONObject b = keys.optJSONObject(k);
                 if (b == null) continue;
                 String op = str(b, "op");
                 if ("action".equals(op)) {
-                    l.keys.put(k, new KeyBinding(op, str(b, "action"), null, 0));
+                    String act = str(b, "action");
+                    if (act != null) l.keys.put(k, new KeyBinding(op, act, null, 0));
                 } else if ("step".equals(op)) {
-                    l.keys.put(k, new KeyBinding(op, null, str(b, "target"), num(b, "by", 0)));
+                    String target = str(b, "target");
+                    Object byv = b.opt("by");
+                    boolean byOk = !(byv instanceof Number) || isFinite(((Number) byv).doubleValue());
+                    if (target != null && byOk) l.keys.put(k, new KeyBinding(op, null, target, num(b, "by", 0)));
                 }
             }
         }
@@ -98,6 +106,16 @@ public final class Layout {
     static String str(JSONObject o, String k) {
         Object v = o.opt(k);
         return v instanceof String ? (String) v : null;
+    }
+
+    static boolean isFinite(double d) {
+        return !Double.isNaN(d) && !Double.isInfinite(d);
+    }
+
+    /** Number cast to float; falls back to def when the float is not finite (e.g. 1e300). NaN def is allowed. */
+    static float fnum(JSONObject o, String k, double def) {
+        float f = (float) num(o, k, def);
+        return (Double.isNaN(f) || Double.isInfinite(f)) ? (float) def : f;
     }
 
     static double num(JSONObject o, String k, double def) {

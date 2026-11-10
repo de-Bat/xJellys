@@ -32,13 +32,13 @@ public final class Node {
         n.type = t == null ? "" : t;
         n.id = Layout.str(o, "id");
         n.action = Layout.str(o, "action");
-        n.x = (float) Layout.num(o, "x", Double.NaN);
-        n.y = (float) Layout.num(o, "y", Double.NaN);
-        n.w = (float) Layout.num(o, "w", Double.NaN);
-        n.h = (float) Layout.num(o, "h", Double.NaN);
-        n.pad = (float) Layout.num(o, "pad", 0);
-        n.gap = (float) Layout.num(o, "gap", 0);
-        n.radius = (float) Layout.num(o, "radius", 0);
+        n.x = Layout.fnum(o, "x", Double.NaN);
+        n.y = Layout.fnum(o, "y", Double.NaN);
+        n.w = Layout.fnum(o, "w", Double.NaN);
+        n.h = Layout.fnum(o, "h", Double.NaN);
+        n.pad = Layout.fnum(o, "pad", 0);
+        n.gap = Layout.fnum(o, "gap", 0);
+        n.radius = Layout.fnum(o, "radius", 0);
         n.bg = parseColor(Layout.str(o, "bg"));
         n.enabled = Layout.bool(o, "enabled", true);
         boolean defFocus = "button".equals(n.type);
@@ -58,6 +58,9 @@ public final class Node {
         if (s == null || s.length() < 2 || s.charAt(0) != '#') return null;
         String hex = s.substring(1);
         if (hex.length() != 6 && hex.length() != 8) return null;
+        for (int i = 0; i < hex.length(); i++) {
+            if (Character.digit(hex.charAt(i), 16) < 0) return null;
+        }
         try {
             long v = Long.parseLong(hex, 16);
             if (hex.length() == 6) v |= 0xFF000000L;
@@ -70,8 +73,8 @@ public final class Node {
     // text
     public String text() { return strOr("text", ""); }
     public float size() {
-        double d = Layout.num(raw, "size", 0.03);
-        return d > 0 ? (float) d : 0.03f;
+        float f = Layout.fnum(raw, "size", 0.03);
+        return f > 0 ? f : 0.03f;
     }
     public Integer color() { return parseColor(Layout.str(raw, "color")); }
     public boolean bold() { return Layout.bool(raw, "bold", false); }
@@ -110,7 +113,7 @@ public final class Node {
         double s = Layout.num(raw, "scale", 1);
         return s == 0 ? 1 : s;
     }
-    public int decimals() { return (int) Math.max(0, Layout.num(raw, "decimals", 0)); }
+    public int decimals() { return (int) Math.min(6, Math.max(0, Layout.num(raw, "decimals", 0))); }
     public String suffix() { return strOr("suffix", ""); }
     public boolean signed() { return Layout.bool(raw, "signed", false); }
     public String changedAction() { return Layout.str(raw, "changedAction"); }
