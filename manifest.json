@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.Jellycap/JellyCap.png",
     "versions": [
       {
+        "version": "1.2.0.0",
+        "changelog": "1.2.0.0: New setting *Recap when resuming an episode* (also per show): previous episodes + this episode so far (default), previous episodes only, or this episode so far only. Text and Both recaps of the watched part quote the episode subtitles (dialogue cards per moment, spoiler free). 1.1.1.0: Fix recaps failing on Jellyfin 10.11 and newer (TypeLoadException for Jellyfin.Data.Enums.SortOrder). Episodes are now ordered by the plugin instead of the library query.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.Jellycap-v1.2.0.0/Jellyfin.Plugin.Jellycap_1.2.0.0.zip",
+        "checksum": "ADCA4A3F14F2C22346E47C7D6A714F83",
+        "timestamp": "2026-11-10T06:43:22Z"
+      },
+      {
         "version": "1.1.1.0",
         "changelog": "1.1.1.0: Fix recaps failing on Jellyfin 10.11 and newer (TypeLoadException for Jellyfin.Data.Enums.SortOrder). Episodes are now ordered by the plugin instead of the library query.",
         "targetAbi": "10.9.0.0",
