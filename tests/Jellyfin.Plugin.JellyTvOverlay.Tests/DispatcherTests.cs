@@ -28,6 +28,20 @@ public class DispatcherTests
 
         public bool Fault { get; set; }
 
+        /// <summary>When set, the offer is only made for this trigger name.</summary>
+        public string? OfferOn { get; set; }
+
+        /// <summary>Handlers now run on pool tasks: wait (real time, bounded) until n events arrived.</summary>
+        public async Task WaitForEvents(int n)
+        {
+            for (var i = 0; i < 500 && Events.Count < n; i++)
+            {
+                await Task.Delay(10);
+            }
+
+            Assert.True(Events.Count >= n, $"expected {n} events, got {Events.Count}");
+        }
+
         public IReadOnlyList<JsonObject> Events
         {
             get
@@ -63,7 +77,8 @@ public class DispatcherTests
             }
 
             var isTrigger = json.Contains("\"type\":\"trigger\"", StringComparison.Ordinal);
-            string? answer = isTrigger && OfferId is not null
+            var offers = OfferOn is null || json.Contains("\"trigger\":\"" + OfferOn + "\"", StringComparison.Ordinal);
+            string? answer = isTrigger && offers && OfferId is not null
                 ? new JsonObject { ["offer"] = new JsonObject { ["id"] = OfferId, ["label"] = OfferLabel ?? OfferId } }.ToJsonString()
                 : null;
             if (isTrigger && Delay is { } d)
@@ -262,6 +277,9 @@ public class DispatcherTests
         d.Register("slow", "Slow", slow.Handler);
 
         var task = d.OnTriggerAsync(T(TriggerKind.Pause));
+        await fast.WaitForEvents(1);
+        await slow.WaitForEvents(1);
+        await Task.Delay(50); // let the fast handler's pool task finish before the window closes
         Assert.False(task.IsCompleted);
         clock.Advance(TimeSpan.FromMilliseconds(Dispatcher.OfferWindowMs));
         await task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -270,6 +288,132 @@ public class DispatcherTests
         Assert.Single(fast.OfType("chosen"));
         Assert.Empty(slow.OfType("chosen"));
         Assert.Empty(q.Shown(Dev));
+    }
+
+    [Fact]
+    public async Task ResumeDuringOfferWindow_NoChooserNoChosen()
+    {
+        var (d, q, clock, _) = Make();
+        var a = new FakeClient { OfferId = "cast", OfferOn = "pause", Delay = TimeSpan.FromMilliseconds(100), Clock = clock };
+        var b = new FakeClient { OfferId = "sync", OfferOn = "pause", Delay = TimeSpan.FromMilliseconds(100), Clock = clock };
+        d.Register("a", "A", a.Handler);
+        d.Register("b", "B", b.Handler);
+
+        var pause = d.OnTriggerAsync(T(TriggerKind.Pause));
+        await a.WaitForEvents(1);
+        await b.WaitForEvents(1);
+        var resume = d.OnTriggerAsync(T(TriggerKind.Resume));
+        await a.WaitForEvents(2);
+        await b.WaitForEvents(2);
+        await Task.Delay(50);
+        clock.Advance(TimeSpan.FromMilliseconds(Dispatcher.OfferWindowMs));
+        await Task.WhenAll(pause, resume).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Empty(q.Shown(Dev));
+        Assert.Null(d.HolderOf(Dev));
+        Assert.Empty(a.OfType("chosen"));
+        Assert.Empty(b.OfType("chosen"));
+    }
+
+    [Fact]
+    public async Task ResumeDuringOfferWindow_SingleOffer_NoChosen()
+    {
+        var (d, _, clock, _) = Make();
+        var a = new FakeClient { OfferId = "cast", OfferOn = "pause", Delay = TimeSpan.FromMilliseconds(100), Clock = clock };
+        d.Register("a", "A", a.Handler);
+
+        var pause = d.OnTriggerAsync(T(TriggerKind.Pause));
+        await a.WaitForEvents(1);
+        var resume = d.OnTriggerAsync(T(TriggerKind.Resume));
+        await a.WaitForEvents(2);
+        await Task.Delay(50);
+        clock.Advance(TimeSpan.FromMilliseconds(Dispatcher.OfferWindowMs));
+        await Task.WhenAll(pause, resume).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Empty(a.OfType("chosen"));
+    }
+
+    [Fact]
+    public async Task BlockingHandler_DoesNotDelayOthers()
+    {
+        var (d, _, clock, _) = Make();
+        using var release = new ManualResetEventSlim();
+        var ok = new FakeClient { OfferId = "cast" };
+        d.Register("blocker", "B", _ => { release.Wait(TimeSpan.FromSeconds(10)); return Task.FromResult<string?>(null); });
+        d.Register("ok", "OK", ok.Handler);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var task = d.OnTriggerAsync(T(TriggerKind.Pause));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), "OnTriggerAsync blocked on a handler");
+        await ok.WaitForEvents(1);
+        await Task.Delay(50);
+        clock.Advance(TimeSpan.FromMilliseconds(Dispatcher.OfferWindowMs));
+        await task.WaitAsync(TimeSpan.FromSeconds(5));
+        release.Set();
+
+        Assert.Single(ok.OfType("chosen"));
+    }
+
+    [Fact]
+    public async Task AppEvent_ForLayoutNotShown_Dropped()
+    {
+        var (d, _, _, log) = Make();
+        var a = new FakeClient();
+        d.Register("a", "A", a.Handler);
+
+        await d.OnAppEventAsync(Dev, Evt("a/ghost", "action", action: "x"));
+        await d.OnAppEventAsync(Dev, Evt("a/ghost", "closed", reason: "back"));
+
+        Assert.Empty(a.Events);
+        Assert.Equal(2, log.Count(l => l.Contains("not shown")));
+    }
+
+    [Fact]
+    public async Task ClosedReplaced_KeepsLayout_ForwardsToOwner()
+    {
+        var (d, q, _, _) = Make();
+        var a = new FakeClient();
+        d.Register("a", "A", a.Handler);
+        Assert.True(d.Show("a", Dev, Layout("menu", "interactive")));
+
+        await d.OnAppEventAsync(Dev, Evt("a/menu", "closed", reason: "replaced"));
+
+        Assert.Equal(new[] { "a/menu" }, q.Shown(Dev).Select(l => l.Id));
+        Assert.Equal("a/menu", d.HolderOf(Dev));
+        var closed = Assert.Single(a.OfType("closed"));
+        Assert.Equal("replaced", (string?)closed["reason"]);
+    }
+
+    [Fact]
+    public void Close_OnlyOwnLayouts()
+    {
+        var (d, q, _, _) = Make();
+        d.Register("a", "A", new FakeClient().Handler);
+        d.Register("b", "B", new FakeClient().Handler);
+        Assert.True(d.Show("a", Dev, Layout("menu")));
+
+        d.Close("b", Dev, "a/menu");
+        d.Close("b", Dev, "menu");
+        Assert.Single(q.Shown(Dev));
+
+        d.Close("a", Dev, "menu");
+        Assert.Empty(q.Shown(Dev));
+    }
+
+    [Fact]
+    public async Task AppEvent_RoutedByShownOwner()
+    {
+        var (d, _, _, _) = Make();
+        var a = new FakeClient();
+        var ab = new FakeClient();
+        d.Register("a", "A", a.Handler);
+        d.Register("ab", "AB", ab.Handler);
+        Assert.True(d.Show("ab", Dev, Layout("menu")));
+
+        await d.OnAppEventAsync(Dev, Evt("ab/menu", "action", action: "go"));
+
+        Assert.Single(ab.OfType("action"));
+        Assert.Empty(a.Events);
     }
 
     [Fact]
@@ -456,6 +600,9 @@ public class DispatcherTests
         var (d, _, _, _) = Make();
         Assert.False(d.Register("host", "Host", new FakeClient().Handler));
         Assert.False(d.Register(string.Empty, "x", new FakeClient().Handler));
+        Assert.False(d.Register("Host", "x", new FakeClient().Handler));
+        Assert.False(d.Register("hostile", "x", new FakeClient().Handler));
+        Assert.False(d.Register("a/b", "x", new FakeClient().Handler));
         Assert.True(d.Register("a", "A", new FakeClient().Handler));
         Assert.True(d.Register("a", "A again", new FakeClient().Handler));
     }

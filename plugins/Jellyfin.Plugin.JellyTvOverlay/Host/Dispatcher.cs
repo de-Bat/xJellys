@@ -9,7 +9,7 @@ namespace Jellyfin.Plugin.JellyTvOverlay.Host;
 /// <summary>
 /// Routes triggers to clients, collects offers (chooser when several), arbitrates remote focus per device
 /// and routes app events to layout owners. No Jellyfin types; thread-safe.
-/// Handlers are invoked on the calling thread and must return quickly (do the work asynchronously).
+/// Trigger handlers run on one pool task per client; app-event and chosen sends are invoked directly.
 /// </summary>
 public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<string>? log = null)
 {
@@ -29,6 +29,7 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         public readonly object Gate = new();
         public PendingChoice? Pending;
         public string? SessionId;
+        public long Generation; // bumped per trigger under Gate
     }
 
     private readonly ConcurrentDictionary<string, Client> _clients = new(StringComparer.Ordinal);
@@ -36,7 +37,9 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
 
     public bool Register(string clientId, string displayName, Func<string, Task<string?>> onEvent)
     {
-        if (string.IsNullOrWhiteSpace(clientId) || clientId == HostOwner || onEvent is null)
+        // '/' separates owner from id and "host*" is reserved, so no client can reach another owner's namespace.
+        if (string.IsNullOrWhiteSpace(clientId) || clientId.Contains('/') || onEvent is null
+            || clientId.StartsWith(HostOwner, StringComparison.OrdinalIgnoreCase))
         {
             Log($"register rejected: invalid client id '{clientId}'");
             return false;
@@ -50,15 +53,23 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
     {
         var name = TriggerName(t.Kind);
         var st = State(t.DeviceId);
-        var closed = new List<(string Owner, string LayoutId)>();
+        var closedFor = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         HashSet<string>? only = null;
+        long gen;
         lock (st.Gate)
         {
+            gen = ++st.Generation;
             st.SessionId = t.SessionId;
             foreach (var l in queue.Shown(t.DeviceId).Where(l => l.CloseOn.Contains(name)))
             {
                 CloseLocked(st, t.DeviceId, l.Id);
-                closed.Add((OwnerOf(l), l.Id));
+                var owner = OwnerOf(l);
+                if (!closedFor.TryGetValue(owner, out var events))
+                {
+                    closedFor[owner] = events = new List<string>();
+                }
+
+                events.Add(ClosedEvent(t.DeviceId, l.Id, name));
             }
 
             foreach (var l in queue.Shown(t.DeviceId).Where(l => l.SuppressTriggers.Contains(name)))
@@ -67,11 +78,9 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
             }
         }
 
-        var pending = new List<Task>();
-        foreach (var (owner, layoutId) in closed)
-        {
-            pending.Add(SendTo(owner, ClosedEvent(t.DeviceId, layoutId, name)));
-        }
+        using var cts = new CancellationTokenSource();
+        var window = Task.Delay(TimeSpan.FromMilliseconds(OfferWindowMs), clock, cts.Token);
+        var pending = new ConcurrentBag<Task>();
 
         var json = new JsonObject
         {
@@ -84,15 +93,39 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
             ["userId"] = t.UserId,
         }.ToJsonString();
 
-        var recipients = _clients.Values.Where(c => only is null || only.Contains(c.Id)).ToList();
-        var calls = recipients.Select(c => (Client: c, Task: Invoke(c, json))).ToList();
-
-        using (var cts = new CancellationTokenSource())
+        // One pool task per client, so a handler that blocks cannot hold up the others. Within a client,
+        // its closed events are invoked before the trigger (their completion is not awaited first).
+        var calls = new List<(Client Client, Task<string?> Task)>();
+        foreach (var c in _clients.Values)
         {
-            var window = Task.Delay(TimeSpan.FromMilliseconds(OfferWindowMs), clock, cts.Token);
-            await Task.WhenAny(Task.WhenAll(calls.Select(c => c.Task)), window).ConfigureAwait(false);
-            cts.Cancel();
+            closedFor.TryGetValue(c.Id, out var closedEvents);
+            var trigger = only is null || only.Contains(c.Id) ? json : null;
+            if (trigger is null && closedEvents is null)
+            {
+                continue;
+            }
+
+            var task = Task.Run(() =>
+            {
+                foreach (var e in closedEvents ?? new List<string>())
+                {
+                    pending.Add(Invoke(c, e));
+                }
+
+                return trigger is null ? Task.FromResult<string?>(null) : Invoke(c, trigger);
+            });
+            if (trigger is null)
+            {
+                pending.Add(task);
+            }
+            else
+            {
+                calls.Add((c, task));
+            }
         }
+
+        await Task.WhenAny(Task.WhenAll(calls.Select(c => c.Task)), window).ConfigureAwait(false);
+        cts.Cancel();
 
         // Snapshot: answers arriving after this point are ignored.
         var offers = new List<Offer>();
@@ -104,16 +137,28 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
             }
         }
 
-        if (offers.Count == 1)
+        bool current;
+        lock (st.Gate)
+        {
+            // A newer trigger (e.g. resume during the window) makes this one's offers stale.
+            current = st.Generation == gen;
+        }
+
+        if (!current)
+        {
+            Log($"{name} offers on {t.DeviceId} dropped: a newer trigger arrived");
+        }
+        else if (offers.Count == 1)
         {
             pending.Add(SendTo(offers[0].ClientId, ChosenEvent(t, offers[0].OfferId)));
         }
         else if (offers.Count > 1)
         {
-            ShowChooser(st, t, offers);
+            ShowChooser(st, t, gen, offers);
         }
 
-        await Task.WhenAll(pending).ConfigureAwait(false);
+        // Late trigger answers are not awaited; Invoke never faults, it logs.
+        await Task.WhenAll(pending.ToArray()).ConfigureAwait(false);
     }
 
     public bool Show(string clientId, string deviceId, string layoutJson)
@@ -158,6 +203,12 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         var st = State(deviceId);
         lock (st.Gate)
         {
+            if (queue.Shown(deviceId).FirstOrDefault(s => s.Id == id) is not { } l || OwnerOf(l) != clientId)
+            {
+                Log($"close ignored for {clientId}: '{id}' is not its shown layout on {deviceId}");
+                return;
+            }
+
             CloseLocked(st, deviceId, id);
         }
     }
@@ -172,26 +223,41 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
             return;
         }
 
+        // "replaced" reports the app swapping in a newer show of the same id: the layout stays shown.
+        var removes = type == "closed" && Str(evt["reason"]) != "replaced";
         var st = State(deviceId);
-        if (layoutId == ChooserId)
+        string owner;
+        string? session;
+        Offer? picked = null;
+        Trigger? ctx = null;
+        lock (st.Gate)
         {
-            Offer? picked = null;
-            Trigger? ctx = null;
-            lock (st.Gate)
+            if (queue.Shown(deviceId).FirstOrDefault(s => s.Id == layoutId) is not { } l)
             {
-                if (type == "action")
-                {
-                    if (st.Pending is null || Str(evt["action"]) is not { } a || !st.Pending.ByAction.TryGetValue(a, out picked))
-                    {
-                        return;
-                    }
-
-                    ctx = st.Pending.Trigger;
-                }
-
-                CloseLocked(st, deviceId, ChooserId);
+                Log($"app event dropped: '{layoutId}' is not shown on {deviceId}");
+                return;
             }
 
+            owner = OwnerOf(l);
+            session = st.SessionId;
+            if (layoutId == ChooserId && type == "action")
+            {
+                if (st.Pending is null || Str(evt["action"]) is not { } a || !st.Pending.ByAction.TryGetValue(a, out picked))
+                {
+                    return;
+                }
+
+                ctx = st.Pending.Trigger;
+                CloseLocked(st, deviceId, ChooserId);
+            }
+            else if (removes)
+            {
+                CloseLocked(st, deviceId, layoutId);
+            }
+        }
+
+        if (layoutId == ChooserId)
+        {
             if (picked is not null && ctx is not null)
             {
                 await SendTo(picked.ClientId, ChosenEvent(ctx, picked.OfferId)).ConfigureAwait(false);
@@ -200,31 +266,13 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
             return;
         }
 
-        var owner = OwnerOfId(layoutId);
-        if (owner is null)
-        {
-            Log($"app event ignored: no owner for '{layoutId}'");
-            return;
-        }
-
         string json;
         if (type == "closed")
         {
-            lock (st.Gate)
-            {
-                CloseLocked(st, deviceId, layoutId);
-            }
-
             json = ClosedEvent(deviceId, layoutId, Str(evt["reason"]) ?? string.Empty);
         }
         else
         {
-            string? session;
-            lock (st.Gate)
-            {
-                session = st.SessionId;
-            }
-
             json = new JsonObject
             {
                 ["type"] = "action",
@@ -249,7 +297,7 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         }
     }
 
-    private void ShowChooser(DeviceState st, Trigger t, List<Offer> offers)
+    private void ShowChooser(DeviceState st, Trigger t, long gen, List<Offer> offers)
     {
         var buttons = new JsonArray();
         var byAction = new Dictionary<string, Offer>(StringComparer.Ordinal);
@@ -291,9 +339,24 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
             },
         }.ToJsonString();
 
-        var layout = LayoutValidator.Validate(json, HostOwner);
+        ValidatedLayout layout;
+        try
+        {
+            layout = LayoutValidator.Validate(json, HostOwner);
+        }
+        catch (LayoutException ex)
+        {
+            Log($"chooser layout invalid: {ex.Message}");
+            return;
+        }
+
         lock (st.Gate)
         {
+            if (st.Generation != gen)
+            {
+                return; // a newer trigger arrived while building the chooser
+            }
+
             // The host's chooser is not subject to focus arbitration: it answers a user gesture.
             st.Pending = new PendingChoice(t, byAction);
             queue.Show(t.DeviceId, layout);
@@ -353,10 +416,6 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
     private static bool IsInteractive(ValidatedLayout l) => l.Focus.StartsWith("interactive", StringComparison.Ordinal);
 
     private static string OwnerOf(ValidatedLayout l) => Str(l.Json["owner"]) ?? string.Empty;
-
-    // Ids are "<owner>/<id>"; client ids may contain '/', so take the longest registered prefix.
-    private string? OwnerOfId(string layoutId)
-        => _clients.Keys.Where(k => layoutId.StartsWith(k + "/", StringComparison.Ordinal)).OrderByDescending(k => k.Length).FirstOrDefault();
 
     private Offer? ParseOffer(string clientId, string? answer)
     {
