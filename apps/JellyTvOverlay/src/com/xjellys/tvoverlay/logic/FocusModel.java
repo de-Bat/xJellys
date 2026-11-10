@@ -24,6 +24,9 @@ import com.xjellys.tvoverlay.model.Node;
  * left/right give PASSTHROUGH. {@code ok} on a node with an action gives ACTION, {@code back} gives
  * BACK, {@code play} gives PASSTHROUGH in passthrough layouts. Anything else is NONE. Focusable
  * nodes without an id or without a rect are skipped.
+ *
+ * <p>{@code showFor}: a node naming an element id is visible only while that element has focus
+ * ({@link #visible(Node)}). Focusable nodes inside such a node are never focus targets, since they may be hidden.
  */
 public final class FocusModel {
     public enum Kind { MOVED, STEPPED, ACTION, BACK, PASSTHROUGH, NONE }
@@ -60,6 +63,7 @@ public final class FocusModel {
     }
 
     private void collect(Node n) {
+        if (n.showFor() != null) return;
         if (n.focusable && n.enabled && n.id != null && rects.get(n.id) != null) order.add(n);
         for (Node c : n.children) collect(c);
     }
@@ -67,6 +71,17 @@ public final class FocusModel {
     /** Id of the focused node, or null when nothing is focusable. */
     public String focused() {
         return focused == null ? null : focused.id;
+    }
+
+    /** Whether n is shown with the current focus (showFor). */
+    public boolean visible(Node n) {
+        return visibleFor(n, focused());
+    }
+
+    /** A node without showFor is always visible; with it, only while focusedId names that element. */
+    public static boolean visibleFor(Node n, String focusedId) {
+        String s = n == null ? null : n.showFor();
+        return s == null || s.equals(focusedId);
     }
 
     /** Moves focus to id when it is a focusable node with a rect (e.g. to keep focus after a rebuild). */

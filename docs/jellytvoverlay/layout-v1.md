@@ -108,6 +108,7 @@ Common fields on every node:
 | `radius` | Corner radius as a fraction of screen height. |
 | `focusable` | Whether the node can take focus. |
 | `action` | Action name reported when the node is activated with OK. |
+| `showFor` | Id of a focusable element. The node (with its children) is shown only while that element has focus, and hidden otherwise; it takes no space while hidden. Handled locally on each focus move. Focusable nodes inside a `showFor` node never take focus. A passive layout has no focus, so its `showFor` nodes stay hidden. |
 
 Node types:
 
@@ -252,5 +253,7 @@ A near full-screen card over the dimmed paused video. Left: portrait, name, birt
   "preload": []
 }
 ```
+
+To describe the highlighted poster, give each poster an `id` and put one description per poster in a `stack`, each with `"showFor": "<poster id>"`: only the focused poster's description is shown.
 
 The host rewrites `id` to `JellyXR/actor-detail` and `parent` to `JellyXR/cast` when the owner is `JellyXR`, and sets `owner`.

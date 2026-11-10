@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using MediaBrowser.Controller.Entities.Movies;
@@ -13,6 +14,8 @@ namespace Jellyfin.Plugin.JellyXR.Overlay;
 /// <summary>
 /// JellyXR as a client of the JellyTvOverlay host: the cast panel on pause (passive), or offered on pause /
 /// double pause and shown interactive when chosen. Without the host or the app, PauseCoordinator sends toasts.
+/// The interactive panel carries every actor's detail layout in <c>preload</c>; OK on an actor shows that exact
+/// JSON, so the app opens it from its cache. BACK on a detail returns to the panel in the app (its parent).
 /// </summary>
 public sealed class OverlayClientHost : IHostedService
 {
@@ -27,15 +30,19 @@ public sealed class OverlayClientHost : IHostedService
 
     private readonly ISessionManager _sessions;
     private readonly ILibraryManager _library;
+    private readonly IUserManager _users;
     private readonly CardService _cards;
     private readonly ILogger<OverlayClientHost> _logger;
     private readonly CastShowGate _gate = new();
+    private readonly ConcurrentDictionary<string, string> _userOf = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DetailSet> _details = new(StringComparer.Ordinal);
     private int _showsStarted;
 
-    public OverlayClientHost(ISessionManager sessions, ILibraryManager library, CardService cards, ILogger<OverlayClientHost> logger)
+    public OverlayClientHost(ISessionManager sessions, ILibraryManager library, IUserManager users, CardService cards, ILogger<OverlayClientHost> logger)
     {
         _sessions = sessions;
         _library = library;
+        _users = users;
         _cards = cards;
         _logger = PluginLog.Wrap(logger);
         Config = () => Plugin.Instance?.Configuration;
@@ -44,7 +51,14 @@ public sealed class OverlayClientHost : IHostedService
         FindSession = id => _sessions.Sessions.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal)) is { } s
             ? (s.Client, s.DeviceName)
             : null;
+        BuildDetail = BuildDetailAsync;
     }
+
+    /// <summary>Most actor details preloaded with one panel (the app caches 32 preloads).</summary>
+    internal const int MaxPreloads = 32;
+
+    /// <summary>Actor detail builds running at once for one panel.</summary>
+    internal const int PreloadConcurrency = 8;
 
     // Seams for tests; production values are set in the constructor.
     internal Func<Configuration.PluginConfiguration?> Config { get; set; }
@@ -54,6 +68,15 @@ public sealed class OverlayClientHost : IHostedService
     internal Func<string, string, bool> ShowLayout { get; set; }
 
     internal Func<string?, (string? Client, string? DeviceName)?> FindSession { get; set; }
+
+    /// <summary>Actor detail layout JSON for (person, user id, playing item), or null.</summary>
+    internal Func<Guid, string?, Guid, CancellationToken, Task<string?>> BuildDetail { get; set; }
+
+    /// <summary>How long the interactive panel waits for actor detail preloads; later ones are shown on demand.</summary>
+    internal TimeSpan PreloadWait { get; set; } = TimeSpan.FromMilliseconds(1500);
+
+    /// <summary>User id of the device's latest trigger (tests).</summary>
+    internal string? UserOf(string deviceId) => _userOf.TryGetValue(deviceId, out var u) ? u : null;
 
     internal CastShowGate Gate => _gate;
 
@@ -108,9 +131,16 @@ public sealed class OverlayClientHost : IHostedService
                 var trigger = Str(e, "trigger");
                 if (trigger is "resume" or "stop" or "itemStart")
                 {
-                    // the cast panel closes on these (closeOn); builds still running are stale
+                    // the cast panel and its actor details close on these (closeOn); builds still running are stale
                     _gate.Invalidate(deviceId);
+                    _details.TryRemove(deviceId, out _);
                     return null;
+                }
+
+                // "chosen" carries no user: the interactive panel uses the user of the trigger that offered it
+                if (Str(e, "userId") is { Length: > 0 } userId)
+                {
+                    _userOf[deviceId] = userId;
                 }
 
                 if (trigger is not ("pause" or "doublePause") || Wanted(deviceId, Str(e, "sessionId")) is not { } cfg)
@@ -137,19 +167,23 @@ public sealed class OverlayClientHost : IHostedService
                 return null;
 
             case "closed":
-                // "replaced" = the app swapped in a newer show of the same id (e.g. passive -> interactive): still up
+                // "replaced" = the app swapped in a newer show of the same id (e.g. passive -> interactive): still up.
+                // An actor detail closing (JellyXR/actor:*) leaves the panel up: the app hands it the keys again.
                 if (Str(e, "layoutId") == ClientId + "/" + CastLayoutBuilder.LayoutId && Str(e, "reason") != "replaced")
                 {
                     _gate.Closed(deviceId);
+                    _details.TryRemove(deviceId, out _);
                 }
 
                 return null;
 
             case "action":
-                if (Str(e, "action") is { } action && action.StartsWith("actor:", StringComparison.Ordinal))
+                if (Str(e, "layoutId") == ClientId + "/" + CastLayoutBuilder.LayoutId
+                    && Str(e, "action") is { } action
+                    && action.StartsWith(ActorDetailBuilder.IdPrefix, StringComparison.Ordinal)
+                    && Guid.TryParse(action.AsSpan(ActorDetailBuilder.IdPrefix.Length), out var personId))
                 {
-                    // Actor detail comes with the next release step; nothing to do yet.
-                    _logger.LogDebug("Actor {Action} chosen on {Device}", action, deviceId);
+                    ShowDetail(deviceId, personId);
                 }
 
                 return null;
@@ -233,6 +267,16 @@ public sealed class OverlayClientHost : IHostedService
             layout["ttlMs"] = cfg.OverlaySeconds * 1000;
         }
 
+        if (interactive)
+        {
+            var people = set.Cards.Select(c => c.PersonId).OfType<Guid>().Distinct().ToList();
+            var preload = await PreloadAsync(deviceId, people, UserOf(deviceId), item.Id).ConfigureAwait(false);
+            if (preload.Count > 0)
+            {
+                layout["preload"] = preload;
+            }
+        }
+
         var json = layout.ToJsonString();
         var shown = _gate.TryShow(deviceId, generation, interactive, () => ShowLayout(deviceId, json));
         if (shown)
@@ -250,6 +294,110 @@ public sealed class OverlayClientHost : IHostedService
             _logger.LogDebug("Cast panel for {Item} on {Device} not shown (superseded or rejected by the host)", item.Name, deviceId);
         }
     }
+
+    /// <summary>
+    /// Starts the actor detail builds for a panel (at most <see cref="PreloadConcurrency"/> at once) and waits up to
+    /// <see cref="PreloadWait"/>. Returns the details ready by then, in panel order; the rest stay available for
+    /// OK on that actor. Replaces the device's previous set.
+    /// </summary>
+    internal async Task<JsonArray> PreloadAsync(string deviceId, IReadOnlyList<Guid> people, string? userId, Guid itemId)
+    {
+        var limit = new SemaphoreSlim(PreloadConcurrency);
+        var builds = new Dictionary<Guid, Task<string?>>();
+        foreach (var person in people)
+        {
+            builds[person] = BuildLimitedAsync(person);
+        }
+
+        _details[deviceId] = new DetailSet(builds);
+        if (builds.Count > 0)
+        {
+            await Task.WhenAny(Task.WhenAll(builds.Values), Task.Delay(PreloadWait)).ConfigureAwait(false);
+        }
+
+        var preload = new JsonArray();
+        foreach (var person in people)
+        {
+            if (preload.Count < MaxPreloads && builds[person] is { IsCompletedSuccessfully: true, Result: { } json })
+            {
+                preload.Add(JsonNode.Parse(json));
+            }
+        }
+
+        _logger.LogDebug("Actor details for {Device}: {Ready} of {Count} preloaded", deviceId, preload.Count, people.Count);
+        return preload;
+
+        async Task<string?> BuildLimitedAsync(Guid person)
+        {
+            await limit.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                return await BuildDetail(person, userId, itemId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Actor detail for {Person} failed: {Error}", person, ex.Message);
+                return null;
+            }
+            finally
+            {
+                limit.Release();
+            }
+        }
+    }
+
+    /// <summary>OK on an actor: shows the detail built with the panel (the preloaded JSON), or once its build ends.</summary>
+    private void ShowDetail(string deviceId, Guid personId)
+    {
+        if (!_details.TryGetValue(deviceId, out var set) || !set.Builds.TryGetValue(personId, out var build))
+        {
+            _logger.LogDebug("No actor detail for {Person} on {Device}", personId, deviceId);
+            return;
+        }
+
+        if (build.IsCompleted)
+        {
+            Show(build);
+            return;
+        }
+
+        // not ready when the panel was shown: show it when its build finishes, if the panel is still up
+        _ = build.ContinueWith(
+            t =>
+            {
+                if (_details.TryGetValue(deviceId, out var cur) && ReferenceEquals(cur, set))
+                {
+                    Show(t);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        void Show(Task<string?> t)
+        {
+            if (t is { IsCompletedSuccessfully: true, Result: { } json })
+            {
+                var shown = ShowLayout(deviceId, json);
+                _logger.LogDebug("Actor detail {Person} on {Device}: {State}", personId, deviceId, shown ? "shown" : "rejected by the host");
+            }
+        }
+    }
+
+    private async Task<string?> BuildDetailAsync(Guid personId, string? userId, Guid itemId, CancellationToken ct)
+    {
+        if (!Guid.TryParse(userId, out var uid) || _users.UserById(uid) is not { } user)
+        {
+            _logger.LogDebug("No actor detail for {Person}: user {User} not found", personId, userId);
+            return null;
+        }
+
+        var loaded = await PersonLibrary.LoadAsync(_library, personId, user, itemId, ct).ConfigureAwait(false);
+        return loaded is { } l ? ActorDetailBuilder.Build(l.Person, l.Titles).ToJsonString() : null;
+    }
+
+    /// <summary>The actor detail builds of the panel shown on a device: person id to its layout JSON (null = none).</summary>
+    private sealed record DetailSet(IReadOnlyDictionary<Guid, Task<string?>> Builds);
 
     private static string? Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;

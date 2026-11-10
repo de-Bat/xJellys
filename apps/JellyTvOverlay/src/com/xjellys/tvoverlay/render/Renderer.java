@@ -35,7 +35,8 @@ import com.xjellys.tvoverlay.model.Node;
  * box; size, pad, gap and radius are fractions of the screen height. A missing size fills the cross axis (and the
  * whole box in a stack) and wraps on the main axis of a row/column; text, value, button and icon wrap. Unknown node
  * types give no view. Everything key handling needs later (focus targets, rings, list scrollers, value views,
- * scroll texts, pages and sequences) is collected in {@link Refs} so a key press never rebuilds.
+ * scroll texts, pages and sequences) is collected in {@link Refs} so a key press never rebuilds. Nodes with
+ * {@code showFor} start hidden; the window shows them while their element has focus.
  */
 public final class Renderer {
     static final int RING = 0xFF4AA3FF;
@@ -78,6 +79,8 @@ public final class Renderer {
         final Map<String, ScrollView> scrollTexts = new HashMap<String, ScrollView>();
         final List<Timed> pages = new ArrayList<Timed>();
         final List<Timed> sequences = new ArrayList<Timed>();
+        /** Views of showFor nodes, with their node (visibility follows focus). */
+        final Map<View, Node> showFor = new LinkedHashMap<View, Node>();
     }
 
     private final Context ctx;
@@ -168,6 +171,10 @@ public final class Renderer {
         if (!"button".equals(t)) v.setPadding(pad, pad, pad, pad);
         if (!"button".equals(t)) background(v, n, round, "image".equals(t) ? Integer.valueOf(0x33FFFFFF) : null, 0);
         v.setLayoutParams(params(n, parent, lw, lh, pw, ph, round));
+        if (n.showFor() != null) {
+            v.setVisibility(View.GONE);
+            refs.showFor.put(v, n);
+        }
         if (n.focusable && n.id != null) {
             refs.focusables.put(n.id, v);
             refs.rings.put(n.id, ring(round, "button".equals(t) && n.radius <= 0 ? 0.01f * sh : n.radius * sh));

@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import org.junit.jupiter.api.Test;
 
 import com.xjellys.tvoverlay.model.Layout;
+import com.xjellys.tvoverlay.model.Node;
 
 public class FocusModelTest {
     private static Layout lay(String focus, String keys, String children) throws Exception {
@@ -186,5 +187,36 @@ public class FocusModelTest {
         assertFalse(f.setFocused("nope"));
         assertFalse(f.setFocused(null));
         assertEquals("b", f.focused());
+    }
+
+    @Test
+    public void showFor_visibleOnlyWhenFocused() throws Exception {
+        String desc = "{\"type\":\"column\",\"id\":\"desc:a\",\"showFor\":\"a\",\"children\":["
+                + "{\"type\":\"button\",\"id\":\"inside\",\"action\":\"z\"}]}";
+        Layout l = lay("interactive", null, "[" + btn("a", "x") + "," + btn("b", "y") + "," + desc
+                + ",{\"type\":\"text\",\"id\":\"plain\",\"text\":\"t\"}]");
+        Node d = l.root.children.get(2);
+        Node plain = l.root.children.get(3);
+        assertEquals("a", d.showFor());
+        assertNull(plain.showFor());
+
+        FocusModel f = new FocusModel(l, rects("a", r(0, 0, 10, 10), "b", r(0, 20, 10, 30), "inside", r(0, 40, 10, 50)));
+        assertEquals("a", f.focused());
+        assertTrue(f.visible(d));
+        assertTrue(f.visible(plain));
+
+        f.onKey("down");
+        assertEquals("b", f.focused());
+        assertFalse(f.visible(d));
+        assertTrue(f.visible(plain));
+
+        // nodes inside a showFor node never take focus (they may be hidden)
+        assertEquals(FocusModel.Kind.NONE, f.onKey("down").kind);
+        assertEquals("b", f.focused());
+        assertFalse(f.setFocused("inside"));
+
+        assertTrue(FocusModel.visibleFor(d, "a"));
+        assertFalse(FocusModel.visibleFor(d, null));
+        assertTrue(FocusModel.visibleFor(plain, null));
     }
 }

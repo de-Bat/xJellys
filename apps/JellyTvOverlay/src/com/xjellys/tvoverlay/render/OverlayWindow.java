@@ -27,6 +27,7 @@ import java.util.Map;
 import com.xjellys.tvoverlay.logic.FocusModel;
 import com.xjellys.tvoverlay.logic.ValueState;
 import com.xjellys.tvoverlay.model.Layout;
+import com.xjellys.tvoverlay.model.Node;
 
 /**
  * One full-screen TYPE_APPLICATION_OVERLAY window per shown layout. Passive layouts are not focusable or
@@ -287,11 +288,20 @@ public final class OverlayWindow {
             if (old != null) old.setForeground(null);
         }
         focusedId = id;
+        applyShowFor();
         if (id == null) return;
         View v = refs.focusables.get(id);
         if (v == null) return;
         v.setForeground(refs.rings.get(id));
         ensureVisible(id, v);
+    }
+
+    /** showFor nodes: visible only while their element has focus (local, no rebuild). */
+    private void applyShowFor() {
+        for (Map.Entry<View, Node> e : refs.showFor.entrySet()) {
+            int vis = FocusModel.visibleFor(e.getValue(), focusedId) ? View.VISIBLE : View.GONE;
+            if (e.getKey().getVisibility() != vis) e.getKey().setVisibility(vis);
+        }
     }
 
     /** Scrolls the enclosing list just enough to show v (instant: no animation delay). */

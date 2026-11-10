@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+using Jellyfin.Plugin.JellyTvOverlay.Layout;
 using Jellyfin.Plugin.JellyXR.Configuration;
 using Jellyfin.Plugin.JellyXR.Overlay;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,7 +18,7 @@ public class OverlayClientHostTests
     private OverlayClientHost NewHost()
     {
         // Library and cards are never reached by these tests (builds start in the background and are counted only).
-        var host = new OverlayClientHost(null!, null!, null!, NullLogger<OverlayClientHost>.Instance)
+        var host = new OverlayClientHost(null!, null!, null!, null!, NullLogger<OverlayClientHost>.Instance)
         {
             Config = () => _cfg,
             FindSession = id => id == "s1" ? ("Android TV", "Living room") : null,
@@ -142,5 +144,133 @@ public class OverlayClientHostTests
         }
 
         Assert.Equal(0, host.ShowsStarted);
+    }
+
+    private static string Detail(Guid person) =>
+        ActorDetailBuilder.Build(new PersonInfo(person, "Ada", null, null, null), Array.Empty<LibraryTitle>()).ToJsonString();
+
+    private static string ActorAction(Guid person, string layoutId = "JellyXR/cast") =>
+        $"{{\"type\":\"action\",\"deviceId\":\"d1\",\"sessionId\":\"s1\",\"layoutId\":\"{layoutId}\",\"action\":\"actor:{person:N}\",\"elementId\":\"p0\",\"value\":{{}}}}";
+
+    private async Task WaitForShows(int count)
+    {
+        for (var i = 0; i < 200 && _shows.Count < count; i++)
+        {
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
+    public async Task Preload_ReadyDetailsOnly_ActionShowsTheSameJson()
+    {
+        var host = NewHost();
+        host.PreloadWait = TimeSpan.FromMilliseconds(150);
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var slow = new TaskCompletionSource<string?>();
+        host.BuildDetail = (p, _, _, _) => p == a ? Task.FromResult<string?>(Detail(a)) : slow.Task;
+
+        var preload = await host.PreloadAsync("d1", new[] { a, b }, "u1", Guid.NewGuid());
+
+        Assert.Single(preload);
+        Assert.Equal(Detail(a), preload[0]!.ToJsonString());
+
+        // the cast layout carrying it passes the host's validator
+        var cast = CastLayoutBuilder.Build(new CardSet("Cast", new[] { new Card("Ada", null, PersonId: a), new Card("Bob", null, PersonId: b) }), interactive: true);
+        cast["preload"] = preload;
+        var v = LayoutValidator.Validate(cast.ToJsonString(), "JellyXR");
+        Assert.Equal("JellyXR/actor:" + a.ToString("N"), v.Json["preload"]![0]!["id"]!.GetValue<string>());
+
+        // OK on a preloaded actor: Show with the exact preloaded JSON (the app's cache hits)
+        Assert.Null(await host.OnEventAsync(ActorAction(a)));
+        Assert.Equal(new[] { Detail(a) }, _shows);
+
+        // not ready in time: shown when its build finishes
+        Assert.Null(await host.OnEventAsync(ActorAction(b)));
+        Assert.Single(_shows);
+        slow.SetResult(Detail(b));
+        await WaitForShows(2);
+        Assert.Equal(new[] { Detail(a), Detail(b) }, _shows);
+    }
+
+    [Fact]
+    public async Task Preload_AtMostEightBuildsAtOnce()
+    {
+        var host = NewHost();
+        var running = 0;
+        var max = 0;
+        host.BuildDetail = async (p, _, _, _) =>
+        {
+            var now = Interlocked.Increment(ref running);
+            InterlockedMax(ref max, now);
+            await Task.Delay(20);
+            Interlocked.Decrement(ref running);
+            return Detail(p);
+        };
+
+        var people = Enumerable.Range(0, 20).Select(_ => Guid.NewGuid()).ToList();
+        var preload = await host.PreloadAsync("d1", people, "u1", Guid.NewGuid());
+
+        Assert.Equal(20, preload.Count);
+        Assert.InRange(max, 1, 8);
+        Assert.Equal(people.Select(Detail), preload.Select(p => p!.ToJsonString()));
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int cur;
+        while ((cur = Volatile.Read(ref target)) < value && Interlocked.CompareExchange(ref target, value, cur) != cur)
+        {
+        }
+    }
+
+    [Fact]
+    public async Task Action_UnknownActorOrOtherLayout_ShowsNothing()
+    {
+        var host = NewHost();
+        var a = Guid.NewGuid();
+        host.BuildDetail = (p, _, _, _) => Task.FromResult<string?>(Detail(p));
+        await host.PreloadAsync("d1", new[] { a }, "u1", Guid.NewGuid());
+
+        await host.OnEventAsync(ActorAction(Guid.NewGuid()));
+        await host.OnEventAsync(ActorAction(a, "JellyXR/other"));
+        await host.OnEventAsync(ActorAction(a).Replace("d1", "d2"));
+        await Task.Delay(50);
+        Assert.Empty(_shows);
+    }
+
+    [Fact]
+    public async Task Resume_DropsPreloadedDetails()
+    {
+        var host = NewHost();
+        var a = Guid.NewGuid();
+        host.BuildDetail = (p, _, _, _) => Task.FromResult<string?>(Detail(p));
+        await host.PreloadAsync("d1", new[] { a }, "u1", Guid.NewGuid());
+
+        await host.OnEventAsync(Trigger("resume"));
+        await host.OnEventAsync(ActorAction(a));
+        Assert.Empty(_shows);
+    }
+
+    [Fact]
+    public async Task ClosedActorDetail_KeepsCastInteractive_NoReshow()
+    {
+        var host = NewHost();
+        Assert.True(host.Gate.TryShow("d1", host.Gate.Begin("d1"), interactive: true, () => true));
+
+        // BACK on the detail: the cast panel under it takes the keys again (app focus stack); nothing to show
+        await host.OnEventAsync(Closed("back", "JellyXR/actor:" + Guid.NewGuid().ToString("N")));
+
+        Assert.Empty(_shows);
+        Assert.False(host.Gate.TryShow("d1", host.Gate.Begin("d1"), interactive: false, () => true));
+    }
+
+    [Fact]
+    public async Task Trigger_RemembersUserForTheChosenShow()
+    {
+        var host = NewHost();
+        var json = Trigger("doublePause").Replace("\"userId\":\"u1\"", "\"userId\":\"user-7\"");
+        await host.OnEventAsync(json);
+        Assert.Equal("user-7", host.UserOf("d1"));
     }
 }

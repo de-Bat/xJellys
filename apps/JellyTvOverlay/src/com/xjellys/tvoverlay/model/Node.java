@@ -118,6 +118,12 @@ public final class Node {
     public boolean signed() { return Layout.bool(raw, "signed", false); }
     public String changedAction() { return Layout.str(raw, "changedAction"); }
 
+    /** Id of the element whose focus shows this node (hidden otherwise), or null = always shown. */
+    public String showFor() {
+        String s = Layout.str(raw, "showFor");
+        return s == null || s.isEmpty() ? null : s;
+    }
+
     private String strOr(String k, String def) {
         String s = Layout.str(raw, k);
         return s == null ? def : s;
