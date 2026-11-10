@@ -1,0 +1,460 @@
+using System.Collections.Concurrent;
+using System.Text.Json.Nodes;
+using Jellyfin.Plugin.JellyTvOverlay.Delivery;
+using Jellyfin.Plugin.JellyTvOverlay.Layout;
+using Jellyfin.Plugin.JellyTvOverlay.Triggers;
+
+namespace Jellyfin.Plugin.JellyTvOverlay.Host;
+
+/// <summary>
+/// Routes triggers to clients, collects offers (chooser when several), arbitrates remote focus per device
+/// and routes app events to layout owners. No Jellyfin types; thread-safe.
+/// Handlers are invoked on the calling thread and must return quickly (do the work asynchronously).
+/// </summary>
+public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<string>? log = null)
+{
+    public const int OfferWindowMs = 400;
+    public const string HostOwner = "host";
+    public const string ChooserId = HostOwner + "/chooser";
+    private const string ChoosePrefix = "choose:";
+
+    private sealed record Client(string Id, string DisplayName, Func<string, Task<string?>> OnEvent);
+
+    private sealed record Offer(string ClientId, string OfferId, string Label);
+
+    private sealed record PendingChoice(Trigger Trigger, Dictionary<string, Offer> ByAction);
+
+    private sealed class DeviceState
+    {
+        public readonly object Gate = new();
+        public PendingChoice? Pending;
+        public string? SessionId;
+    }
+
+    private readonly ConcurrentDictionary<string, Client> _clients = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DeviceState> _devices = new(StringComparer.Ordinal);
+
+    public bool Register(string clientId, string displayName, Func<string, Task<string?>> onEvent)
+    {
+        if (string.IsNullOrWhiteSpace(clientId) || clientId == HostOwner || onEvent is null)
+        {
+            Log($"register rejected: invalid client id '{clientId}'");
+            return false;
+        }
+
+        _clients[clientId] = new Client(clientId, displayName, onEvent);
+        return true;
+    }
+
+    public async Task OnTriggerAsync(Trigger t)
+    {
+        var name = TriggerName(t.Kind);
+        var st = State(t.DeviceId);
+        var closed = new List<(string Owner, string LayoutId)>();
+        HashSet<string>? only = null;
+        lock (st.Gate)
+        {
+            st.SessionId = t.SessionId;
+            foreach (var l in queue.Shown(t.DeviceId).Where(l => l.CloseOn.Contains(name)))
+            {
+                CloseLocked(st, t.DeviceId, l.Id);
+                closed.Add((OwnerOf(l), l.Id));
+            }
+
+            foreach (var l in queue.Shown(t.DeviceId).Where(l => l.SuppressTriggers.Contains(name)))
+            {
+                (only ??= new HashSet<string>(StringComparer.Ordinal)).Add(OwnerOf(l));
+            }
+        }
+
+        var pending = new List<Task>();
+        foreach (var (owner, layoutId) in closed)
+        {
+            pending.Add(SendTo(owner, ClosedEvent(t.DeviceId, layoutId, name)));
+        }
+
+        var json = new JsonObject
+        {
+            ["type"] = "trigger",
+            ["trigger"] = name,
+            ["deviceId"] = t.DeviceId,
+            ["sessionId"] = t.SessionId,
+            ["itemId"] = t.ItemId.ToString("N"),
+            ["positionTicks"] = t.PositionTicks,
+            ["userId"] = t.UserId,
+        }.ToJsonString();
+
+        var recipients = _clients.Values.Where(c => only is null || only.Contains(c.Id)).ToList();
+        var calls = recipients.Select(c => (Client: c, Task: Invoke(c, json))).ToList();
+
+        using (var cts = new CancellationTokenSource())
+        {
+            var window = Task.Delay(TimeSpan.FromMilliseconds(OfferWindowMs), clock, cts.Token);
+            await Task.WhenAny(Task.WhenAll(calls.Select(c => c.Task)), window).ConfigureAwait(false);
+            cts.Cancel();
+        }
+
+        // Snapshot: answers arriving after this point are ignored.
+        var offers = new List<Offer>();
+        foreach (var (c, task) in calls)
+        {
+            if (task.IsCompletedSuccessfully && ParseOffer(c.Id, task.Result) is { } o)
+            {
+                offers.Add(o);
+            }
+        }
+
+        if (offers.Count == 1)
+        {
+            pending.Add(SendTo(offers[0].ClientId, ChosenEvent(t, offers[0].OfferId)));
+        }
+        else if (offers.Count > 1)
+        {
+            ShowChooser(st, t, offers);
+        }
+
+        await Task.WhenAll(pending).ConfigureAwait(false);
+    }
+
+    public bool Show(string clientId, string deviceId, string layoutJson)
+    {
+        if (!_clients.ContainsKey(clientId))
+        {
+            Log($"show rejected: unknown client '{clientId}'");
+            return false;
+        }
+
+        ValidatedLayout l;
+        try
+        {
+            l = LayoutValidator.Validate(layoutJson, clientId);
+        }
+        catch (LayoutException ex)
+        {
+            Log($"show rejected for {clientId}: {ex.Message}");
+            return false;
+        }
+
+        var st = State(deviceId);
+        lock (st.Gate)
+        {
+            var shown = queue.Shown(deviceId);
+            l = ResolveParent(l, clientId, shown);
+            if (IsInteractive(l) && Holder(shown) is { } holder && holder.Id != l.Id
+                && OwnerOf(holder) != clientId && !ChainReaches(l, holder.Id, shown))
+            {
+                Log($"show rejected for {clientId}: {holder.Id} holds the remote on {deviceId}");
+                return false;
+            }
+
+            queue.Show(deviceId, l);
+            return true;
+        }
+    }
+
+    public void Close(string clientId, string deviceId, string layoutId)
+    {
+        var id = layoutId.StartsWith(clientId + "/", StringComparison.Ordinal) ? layoutId : clientId + "/" + layoutId;
+        var st = State(deviceId);
+        lock (st.Gate)
+        {
+            CloseLocked(st, deviceId, id);
+        }
+    }
+
+    public async Task OnAppEventAsync(string deviceId, JsonObject evt)
+    {
+        var layoutId = Str(evt["layoutId"]);
+        var type = Str(evt["type"]);
+        if (string.IsNullOrEmpty(layoutId) || (type != "action" && type != "closed"))
+        {
+            Log($"app event ignored: type '{type}', layout '{layoutId}'");
+            return;
+        }
+
+        var st = State(deviceId);
+        if (layoutId == ChooserId)
+        {
+            Offer? picked = null;
+            Trigger? ctx = null;
+            lock (st.Gate)
+            {
+                if (type == "action")
+                {
+                    if (st.Pending is null || Str(evt["action"]) is not { } a || !st.Pending.ByAction.TryGetValue(a, out picked))
+                    {
+                        return;
+                    }
+
+                    ctx = st.Pending.Trigger;
+                }
+
+                CloseLocked(st, deviceId, ChooserId);
+            }
+
+            if (picked is not null && ctx is not null)
+            {
+                await SendTo(picked.ClientId, ChosenEvent(ctx, picked.OfferId)).ConfigureAwait(false);
+            }
+
+            return;
+        }
+
+        var owner = OwnerOfId(layoutId);
+        if (owner is null)
+        {
+            Log($"app event ignored: no owner for '{layoutId}'");
+            return;
+        }
+
+        string json;
+        if (type == "closed")
+        {
+            lock (st.Gate)
+            {
+                CloseLocked(st, deviceId, layoutId);
+            }
+
+            json = ClosedEvent(deviceId, layoutId, Str(evt["reason"]) ?? string.Empty);
+        }
+        else
+        {
+            string? session;
+            lock (st.Gate)
+            {
+                session = st.SessionId;
+            }
+
+            json = new JsonObject
+            {
+                ["type"] = "action",
+                ["deviceId"] = deviceId,
+                ["sessionId"] = session,
+                ["layoutId"] = layoutId,
+                ["action"] = Str(evt["action"]),
+                ["elementId"] = Str(evt["elementId"]),
+                ["value"] = evt["value"] is JsonObject v ? v.DeepClone() : new JsonObject(),
+            }.ToJsonString();
+        }
+
+        await SendTo(owner, json).ConfigureAwait(false);
+    }
+
+    public string? HolderOf(string deviceId)
+    {
+        var st = State(deviceId);
+        lock (st.Gate)
+        {
+            return Holder(queue.Shown(deviceId))?.Id;
+        }
+    }
+
+    private void ShowChooser(DeviceState st, Trigger t, List<Offer> offers)
+    {
+        var buttons = new JsonArray();
+        var byAction = new Dictionary<string, Offer>(StringComparer.Ordinal);
+        foreach (var o in offers)
+        {
+            var action = ChoosePrefix + o.ClientId + ":" + o.OfferId;
+            byAction[action] = o;
+            buttons.Add(new JsonObject
+            {
+                ["type"] = "button",
+                ["id"] = "opt" + buttons.Count,
+                ["label"] = o.Label,
+                ["action"] = action,
+                ["focusable"] = true,
+            });
+        }
+
+        var json = new JsonObject
+        {
+            ["v"] = 1,
+            ["id"] = "chooser",
+            ["focus"] = "interactive",
+            ["closeOn"] = new JsonArray("resume", "stop", "itemStart"),
+            ["dim"] = 0.4,
+            ["root"] = new JsonObject
+            {
+                ["type"] = "list",
+                ["id"] = "choices",
+                ["orientation"] = "vertical",
+                ["x"] = 0.3,
+                ["y"] = 0.3,
+                ["w"] = 0.4,
+                ["h"] = 0.4,
+                ["pad"] = 0.02,
+                ["gap"] = 0.02,
+                ["bg"] = "#E0202020",
+                ["radius"] = 0.02,
+                ["children"] = buttons,
+            },
+        }.ToJsonString();
+
+        var layout = LayoutValidator.Validate(json, HostOwner);
+        lock (st.Gate)
+        {
+            // The host's chooser is not subject to focus arbitration: it answers a user gesture.
+            st.Pending = new PendingChoice(t, byAction);
+            queue.Show(t.DeviceId, layout);
+        }
+    }
+
+    // Caller holds st.Gate.
+    private void CloseLocked(DeviceState st, string deviceId, string layoutId)
+    {
+        if (layoutId == ChooserId)
+        {
+            st.Pending = null;
+        }
+
+        queue.Close(deviceId, layoutId);
+    }
+
+    // Validator namespaces the parent under the caller; when that is not shown but the raw value names
+    // another client's shown layout ("a/menu" given by client b), use that id.
+    private static ValidatedLayout ResolveParent(ValidatedLayout l, string clientId, IReadOnlyList<ValidatedLayout> shown)
+    {
+        if (l.Parent is not { } p || shown.Any(s => s.Id == p))
+        {
+            return l;
+        }
+
+        var raw = p.Substring(clientId.Length + 1);
+        if (!shown.Any(s => s.Id == raw))
+        {
+            return l;
+        }
+
+        l.Json["parent"] = raw;
+        return l with { Parent = raw };
+    }
+
+    private static bool ChainReaches(ValidatedLayout l, string holderId, IReadOnlyList<ValidatedLayout> shown)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var parent = l.Parent;
+        while (parent is not null && seen.Add(parent))
+        {
+            if (parent == holderId)
+            {
+                return true;
+            }
+
+            parent = shown.FirstOrDefault(s => s.Id == parent)?.Parent;
+        }
+
+        return false;
+    }
+
+    // Newest shown interactive layout (child layouts stack after their parent).
+    private static ValidatedLayout? Holder(IReadOnlyList<ValidatedLayout> shown) => shown.LastOrDefault(IsInteractive);
+
+    private static bool IsInteractive(ValidatedLayout l) => l.Focus.StartsWith("interactive", StringComparison.Ordinal);
+
+    private static string OwnerOf(ValidatedLayout l) => Str(l.Json["owner"]) ?? string.Empty;
+
+    // Ids are "<owner>/<id>"; client ids may contain '/', so take the longest registered prefix.
+    private string? OwnerOfId(string layoutId)
+        => _clients.Keys.Where(k => layoutId.StartsWith(k + "/", StringComparison.Ordinal)).OrderByDescending(k => k.Length).FirstOrDefault();
+
+    private Offer? ParseOffer(string clientId, string? answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(answer) is JsonObject o && o["offer"] is JsonObject offer
+                && Str(offer["id"]) is { Length: > 0 } id)
+            {
+                return new Offer(clientId, id, Str(offer["label"]) is { Length: > 0 } label ? label : id);
+            }
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            Log($"offer from {clientId} ignored: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    private Task SendTo(string clientId, string json)
+        => _clients.TryGetValue(clientId, out var c) ? Invoke(c, json) : Task.CompletedTask;
+
+    // Never throws or faults: handler failures are logged and read as "no answer".
+    private Task<string?> Invoke(Client c, string json)
+    {
+        Task<string?>? task;
+        try
+        {
+            task = c.OnEvent(json);
+        }
+        catch (Exception ex)
+        {
+            Log($"client {c.Id} handler threw: {ex.Message}");
+            return Task.FromResult<string?>(null);
+        }
+
+        if (task is null)
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        return task.ContinueWith(
+            tk =>
+            {
+                if (tk.IsCompletedSuccessfully)
+                {
+                    return tk.Result;
+                }
+
+                Log($"client {c.Id} handler failed: {tk.Exception?.GetBaseException().Message ?? "canceled"}");
+                return null;
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private static string ClosedEvent(string deviceId, string layoutId, string reason)
+        => new JsonObject { ["type"] = "closed", ["deviceId"] = deviceId, ["layoutId"] = layoutId, ["reason"] = reason }.ToJsonString();
+
+    private static string ChosenEvent(Trigger t, string offerId) => new JsonObject
+    {
+        ["type"] = "chosen",
+        ["deviceId"] = t.DeviceId,
+        ["sessionId"] = t.SessionId,
+        ["offerId"] = offerId,
+        ["itemId"] = t.ItemId.ToString("N"),
+        ["positionTicks"] = t.PositionTicks,
+    }.ToJsonString();
+
+    private static string TriggerName(TriggerKind k) => k switch
+    {
+        TriggerKind.ItemStart => "itemStart",
+        TriggerKind.Pause => "pause",
+        TriggerKind.Resume => "resume",
+        TriggerKind.DoublePause => "doublePause",
+        TriggerKind.Seek => "seek",
+        _ => "stop",
+    };
+
+    private DeviceState State(string deviceId) => _devices.GetOrAdd(deviceId, _ => new DeviceState());
+
+    private static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private void Log(string message)
+    {
+        try
+        {
+            log?.Invoke("JellyTvOverlay dispatcher: " + message);
+        }
+        catch
+        {
+            // Logging must never break dispatch.
+        }
+    }
+}
