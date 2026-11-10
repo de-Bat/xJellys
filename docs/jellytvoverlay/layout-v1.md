@@ -1,0 +1,160 @@
+# JellyTvOverlay layout format v1
+
+A layout is a JSON document that a Jellyfin plugin sends to the JellyTvOverlay host. The host validates it and delivers it to the JellyTvOverlay app on the TV, which renders it. The app holds no plugin knowledge: everything it shows comes from the layout.
+
+Rules that apply everywhere:
+
+- Every layout carries `"v": 1`. A different version is rejected.
+- The app ignores unknown node types and unknown fields, so layouts can grow without breaking older apps. The host keeps them too.
+- Key presses that move focus, scroll or change a value are handled locally in the app. They never wait for the network.
+- Text supports RTL (Hebrew). `dir: "auto"` is resolved per text node from its content.
+- `dim` is a flat translucent black layer. There is no blur.
+- Only one layout holds the remote per device at a time.
+
+## Layout
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `v` | number | required | Must be `1`. |
+| `id` | string | required | Layout id. The host namespaces it as `<owner>/<id>` unless it already starts with `<owner>/`. |
+| `owner` | string | set by the host | The plugin that sent the layout. Any value you send is overwritten. |
+| `focus` | string | `passive` | `passive` (no remote), `interactive` (takes the remote), or `interactive+passthrough` (takes the remote but passes unbound keys on to the player). |
+| `ttlMs` | number | `0` | Auto-close after this many ms. `0` = until closed. |
+| `dim` | number 0 to 1 | none | Opacity of the flat dim layer behind the layout. |
+| `parent` | string | none | Id of a parent layout. Namespaced like `id`. Closing this layout returns to the parent. |
+| `closeOn` | array | `["stop","itemStart"]` | Triggers that close the layout. Subset of `itemStart`, `pause`, `resume`, `doublePause`, `seek`, `stop`. |
+| `suppressTriggers` | array | `[]` | Same trigger names as `closeOn`. While this layout is shown, the host delivers these triggers only to the layout's owner. |
+| `keys` | object | none | Map of key to binding. See Keys. |
+| `preload` | array | none | Layouts to cache on the device without showing them. Each is validated with the same owner. Used so a later `Show` is instant. |
+| `root` | node | required | The root node. |
+
+### Keys
+
+Keys: `left` `right` `up` `down` `ok` `play` `back`.
+
+A binding is one of:
+
+- `{"op":"action","action":"<name>"}`: report the action to the owner plugin.
+- `{"op":"step","target":"<value node id>","by":<number>}`: add `by` to the `value` node with that id, locally. `target` must name a `value` node inside this layout's `root`, otherwise the layout is rejected.
+
+## Nodes
+
+Common fields on every node:
+
+| Field | Meaning |
+|---|---|
+| `type` | Node type. Unknown types are ignored by the app. |
+| `id` | Optional node id. Needed for `value` nodes that are step targets, and reported in events as `elementId`. |
+| `x` `y` `w` `h` | Position and size as fractions of the parent box. Omitted = flow inside the container. |
+| `pad` | Inner padding. |
+| `gap` | Spacing between children. |
+| `bg` | Background colour, `#AARRGGBB`. |
+| `radius` | Corner radius as a fraction of screen height. |
+| `focusable` | Whether the node can take focus. |
+| `action` | Action name reported when the node is activated with OK. |
+
+Node types:
+
+- `text`: `text`, `size` (fraction of screen height, default `0.03`), `color`, `bold`, `maxLines`, `dir` (`auto` | `ltr` | `rtl`, default `auto`), `scroll` (bool; scrolls with up/down when focused).
+- `image`: `src` (absolute URL, or a server-relative path starting with `/`), `fit` (`cover` | `contain`), `round` (bool).
+- `icon`: `name` from the bundled set: `play` `pause` `info` `back` `check` `clock` `person` `subtitles` `left` `right` `up` `down` `close`.
+- `button`: `label`, `icon`, `action`, `enabled` (default `true`; `false` = greyed and not focusable).
+- `row`, `column`, `stack`: `children`.
+- `list`: `children`, `orientation` (`horizontal` | `vertical`). Scrolls to keep focus visible.
+- `pages`: `children`, `intervalMs` (`0` = only left/right when interactive).
+- `sequence`: `children`, each with `durationMs`; `finishedAction` is reported when the last one ends.
+- `value`: `value`, `min`, `max`, `scale` (display divisor), `decimals`, `suffix`, `signed` (bool), `changedAction` (debounced 400 ms).
+
+Images: a server-relative `src` is fetched from the Jellyfin server with the user's token. Absolute URLs on other hosts must be `https` and get no token.
+
+## Events
+
+### App to host
+
+`POST /JellyTvOverlay/Event`, JSON body:
+
+```json
+{"deviceId":"...","layoutId":"JellyXR/actor","type":"action","action":"openActor","elementId":"p1","value":{"off":250},"reason":null}
+```
+
+- `type`: `action` or `closed`.
+- `value`: map of `value` node id to number for the layout (current values).
+- `reason` (for `closed`): `back`, `ttl`, `finished` or `replaced`.
+
+### Host to client (plugin)
+
+Each is a JSON string passed to the client's handler.
+
+```json
+{"type":"trigger","trigger":"pause","deviceId":"d1","sessionId":"s1","itemId":"i1","positionTicks":123456,"userId":"u1"}
+{"type":"action","deviceId":"d1","sessionId":"s1","layoutId":"JellyXR/actor","action":"openActor","elementId":"p1","value":{"off":250}}
+{"type":"chosen","deviceId":"d1","sessionId":"s1","offerId":"watch","itemId":"i1","positionTicks":123456}
+{"type":"closed","deviceId":"d1","layoutId":"JellyXR/actor","reason":"back"}
+```
+
+`trigger` is one of `itemStart`, `pause`, `resume`, `doublePause`, `seek`, `stop`. A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or `null`. Other handler results are ignored; clients act through `Show` and `Close`.
+
+## Example: actor detail ("big card", layout B)
+
+A near full-screen card over the dimmed paused video. Left: portrait, name, birth info, scrollable bio. Right: a "In your library" poster row, and a quick description of the highlighted poster with a disabled Play button. Left/right/up/down are local focus moves; OK on a poster reports the `openTitle` action.
+
+```json
+{
+  "v": 1,
+  "id": "actor-detail",
+  "focus": "interactive",
+  "dim": 0.7,
+  "parent": "cast",
+  "closeOn": ["stop", "itemStart", "resume"],
+  "suppressTriggers": ["pause", "doublePause"],
+  "keys": {
+    "back": { "op": "action", "action": "back" }
+  },
+  "root": {
+    "type": "stack",
+    "x": 0.05, "y": 0.06, "w": 0.9, "h": 0.88,
+    "bg": "#F2121820",
+    "radius": 0.02,
+    "children": [
+      {
+        "type": "row", "pad": 0.03, "gap": 0.03,
+        "children": [
+          {
+            "type": "column", "w": 0.34, "gap": 0.015,
+            "children": [
+              { "type": "image", "id": "portrait", "src": "/Items/p42/Images/Primary", "fit": "cover", "round": true, "h": 0.5 },
+              { "type": "text", "text": "Ada Example", "size": 0.05, "bold": true, "maxLines": 2 },
+              { "type": "text", "text": "Born 12 March 1975, Haifa", "size": 0.025, "color": "#FFB0B8C4" },
+              { "type": "text", "id": "bio", "text": "Long biography text ...", "size": 0.026, "focusable": true, "scroll": true, "maxLines": 8 }
+            ]
+          },
+          {
+            "type": "column", "w": 0.63, "gap": 0.02,
+            "children": [
+              { "type": "text", "text": "In your library", "size": 0.035, "bold": true },
+              {
+                "type": "list", "orientation": "horizontal", "h": 0.45, "gap": 0.012,
+                "children": [
+                  { "type": "image", "id": "poster1", "src": "/Items/m1/Images/Primary", "fit": "cover", "radius": 0.008, "focusable": true, "action": "openTitle", "w": 0.2 },
+                  { "type": "image", "id": "poster2", "src": "/Items/m2/Images/Primary", "fit": "cover", "radius": 0.008, "focusable": true, "action": "openTitle", "w": 0.2 }
+                ]
+              },
+              {
+                "type": "column", "gap": 0.008,
+                "children": [
+                  { "type": "text", "text": "Example Movie (2019) - 1h 52m", "size": 0.03, "bold": true },
+                  { "type": "text", "text": "A short overview in one or two lines.", "size": 0.024, "maxLines": 2 },
+                  { "type": "button", "label": "Play", "icon": "play", "enabled": false }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "preload": []
+}
+```
+
+The host rewrites `id` to `JellyXR/actor-detail` and `parent` to `JellyXR/cast` when the owner is `JellyXR`, and sets `owner`.
