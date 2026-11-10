@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  System + user trust anchors, normal certificate validation, no custom TrustManager.
+  Cleartext is permitted here only because XML cannot allow it by IP range and LAN addresses are not known ahead.
+  The real control is ServerUrl.allowed(), enforced in Api.open(): http only to private/LAN hosts.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
