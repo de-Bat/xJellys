@@ -287,6 +287,11 @@ final class Api {
         call("POST", q.toString(), null);
     }
 
+    /** Remote control: stop playback on the session. */
+    void stop(String sessionId) throws Exception {
+        call("POST", "/Sessions/" + enc(sessionId) + "/Playing/Stop", null);
+    }
+
     /** Remote control: switch the session's subtitle track (clients that list SetSubtitleStreamIndex). */
     void setSubtitle(String sessionId, int index) throws Exception {
         JSONObject body = new JSONObject().put("Name", "SetSubtitleStreamIndex")

@@ -70,7 +70,10 @@ public class WatchService extends Service {
     private long castQuietUntil;
 
     // JellySubSync box: pause, play and pause again within DOUBLE_PAUSE_MS opens it
-    private static final long DOUBLE_PAUSE_MS = 4000, FAST_POLL_MS = 400, FAST_WINDOW_MS = 10000, SUB_CHECK_MS = 3000, SUB_GIVE_UP_MS = 25000;
+    private static final long DOUBLE_PAUSE_MS = 4000, FAST_POLL_MS = 400, FAST_WINDOW_MS = 10000, SUB_GIVE_UP_MS = 35000;
+    /** After the restart: wait this long once the player plays, then ask it to switch; retry a few times. */
+    private static final long SUB_SETTLE_MS = 2500, SUB_RETRY_MS = 4000, STOP_WAIT_MS = 6000;
+    private static final int SUB_TRIES = 3;
     private SyncBox syncBox;
     private boolean rawPaused;
     private String rawItem;
@@ -87,7 +90,9 @@ public class WatchService extends Service {
     /** After a restart: the synced stream the player should be on, -1 = nothing to check. */
     private int pendingSub = -1;
     private long pendingSince;
-    private boolean pendingSent;
+    /** When the restarted player was first seen playing (0 = not yet), when the switch was last asked, and how often. */
+    private long pendingPlaying, pendingLastSent;
+    private int pendingTries;
 
     static void start(Context ctx) {
         ctx.startForegroundService(new Intent(ctx, WatchService.class));
@@ -336,15 +341,25 @@ public class WatchService extends Service {
                 int cur = ps.has("SubtitleStreamIndex") ? ps.optInt("SubtitleStreamIndex", -1) : -1;
                 if (cur == pendingSub) {
                     pendingSub = -1;
-                } else if (syncCanSetSub && !pendingSent && now - pendingSince > SUB_CHECK_MS) {
-                    // the player restarted on another track: ask it to switch
-                    pendingSent = true;
-                    try {
-                        api.setSubtitle(s.optString("Id"), pendingSub);
-                    } catch (Exception e) {
-                        Log.w(TAG, "SetSubtitleStreamIndex failed", e);
+                } else {
+                    // Jellyfin for Android TV ignores the subtitle index of a remote PlayNow and starts on the
+                    // track of the last used language (the original). Once its player really plays, ask it to
+                    // switch; a command sent while it is still loading is dropped, so retry.
+                    if (pendingPlaying == 0) pendingPlaying = now;
+                    if (syncCanSetSub && pendingTries < SUB_TRIES && now - pendingPlaying >= SUB_SETTLE_MS
+                        && now - pendingLastSent >= SUB_RETRY_MS) {
+                        pendingTries++;
+                        pendingLastSent = now;
+                        try {
+                            api.setSubtitle(s.optString("Id"), pendingSub);
+                        } catch (Exception e) {
+                            Log.w(TAG, "SetSubtitleStreamIndex failed", e);
+                        }
                     }
                 }
+            } else {
+                // stopped, loading or paused: wait for the restarted player to play
+                pendingPlaying = 0;
             }
         }
         return syncOpen;
@@ -416,11 +431,14 @@ public class WatchService extends Service {
             Api api = Api.of(prefs);
             int idx = api.subSyncApply(syncItemId, syncSource, syncSub, offsetMs);
             boxBusy("Restarting playback...");
+            stopAndWait(api);
             api.playAt(syncSession, syncItemId, syncSource, syncTicks, syncAudio, idx);
             long now = System.currentTimeMillis();
             pendingSub = idx;
             pendingSince = now;
-            pendingSent = false;
+            pendingPlaying = 0;
+            pendingLastSent = 0;
+            pendingTries = 0;
             castQuietUntil = now + 8000;
             resumedAt = 0;
             syncOpen = false;
@@ -437,6 +455,43 @@ public class WatchService extends Service {
         } finally {
             syncApplying = false;
         }
+    }
+
+    /**
+     * Worker thread: stop the player and wait (up to STOP_WAIT_MS) until the session reports nothing playing.
+     * A PlayNow into an open Jellyfin for Android TV player swaps the player in place (items loaded without
+     * their media sources, old player not ended), which left the subtitle menu without the tracks. Start fresh.
+     */
+    private void stopAndWait(Api api) {
+        try {
+            api.stop(syncSession);
+        } catch (Exception e) {
+            Log.w(TAG, "stop before restart failed", e);
+            return;
+        }
+        long until = System.currentTimeMillis() + STOP_WAIT_MS;
+        while (System.currentTimeMillis() < until) {
+            try {
+                Thread.sleep(300);
+                JSONObject s = null;
+                JSONArray list = api.sessions();
+                for (int i = 0; i < list.length(); i++) {
+                    JSONObject o = list.optJSONObject(i);
+                    if (o != null && syncSession.equals(o.optString("Id"))) s = o;
+                }
+                JSONObject item = s == null ? null : s.optJSONObject("NowPlayingItem");
+                if (item == null || !syncItemId.equals(item.optString("Id"))) {
+                    Thread.sleep(700); // let the player close before it gets the new play command
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                Log.w(TAG, "session check after stop failed", e);
+            }
+        }
+        Log.w(TAG, "player still reports the item " + STOP_WAIT_MS + " ms after stop; restarting anyway");
     }
 
     private void boxBusy(final String msg) {
