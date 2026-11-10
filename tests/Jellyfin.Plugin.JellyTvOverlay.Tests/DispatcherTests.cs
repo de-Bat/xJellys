@@ -570,6 +570,8 @@ public class DispatcherTests
         Assert.Single(b.OfType("trigger"));
 
         // closeOn runs first: a layout closed by the trigger no longer suppresses it.
+        // (Paused first: a closeOn-resume layout shown while playing is stale and rejected.)
+        await d.OnTriggerAsync(T(TriggerKind.Pause));
         Assert.True(d.Show("a", Dev, Layout("brief", suppress: "[\"resume\"]", closeOn: "[\"resume\"]")));
         d.Close("a", Dev, "sync");
         await d.OnTriggerAsync(T(TriggerKind.Resume));
@@ -616,5 +618,35 @@ public class DispatcherTests
         Assert.False(d.Show("nobody", Dev, Layout("x")));
         Assert.Empty(q.Shown(Dev));
         Assert.Equal(2, log.Count);
+    }
+    [Fact]
+    public async Task Show_StaleAfterResume_Rejected()
+    {
+        var (d, q, _, log) = Make();
+        d.Register("a", "A", new FakeClient().Handler);
+        await d.OnTriggerAsync(T(TriggerKind.Pause));
+        await d.OnTriggerAsync(T(TriggerKind.Resume));
+
+        // A pause panel arriving after resume would never close by itself.
+        Assert.False(d.Show("a", Dev, Layout("cast", closeOn: "[\"resume\",\"stop\"]")));
+        Assert.Contains(log, l => l.Contains("a/cast", StringComparison.Ordinal));
+        Assert.True(d.Show("a", Dev, Layout("info", closeOn: "[\"stop\"]")));
+
+        await d.OnTriggerAsync(T(TriggerKind.Pause));
+        Assert.True(d.Show("a", Dev, Layout("cast", closeOn: "[\"resume\",\"stop\"]")));
+
+        await d.OnTriggerAsync(T(TriggerKind.Stop));
+        Assert.False(d.Show("a", Dev, Layout("late", closeOn: "[\"stop\"]")));
+        Assert.True(d.Show("a", Dev, Layout("note", closeOn: "[\"itemStart\"]")));
+        Assert.Equal(new[] { "a/note" }, q.Shown(Dev).Select(l => l.Id));
+    }
+
+    [Fact]
+    public void Show_UnknownState_Allowed()
+    {
+        var (d, q, _, _) = Make();
+        d.Register("a", "A", new FakeClient().Handler);
+        Assert.True(d.Show("a", Dev, Layout("cast", closeOn: "[\"resume\",\"stop\"]")));
+        Assert.Single(q.Shown(Dev));
     }
 }

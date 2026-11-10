@@ -153,4 +153,18 @@ public class LayoutValidatorTests
         Assert.Throws<LayoutException>(() => LayoutValidator.Validate(
             "{\"v\":1,\"root\":{\"type\":\"text\"}}", "JellyXR"));
     }
+    [Fact]
+    public void DuplicateKeys_ThrowsLayoutException()
+    {
+        Assert.Throws<LayoutException>(() => LayoutValidator.Validate(
+            "{\"v\":1,\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"text\"}}", "o"));
+        Assert.Throws<LayoutException>(() => LayoutValidator.Validate(
+            "{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"text\",\"children\":[{\"id\":\"x\",\"id\":\"y\"}]}}", "o"));
+    }
+
+    [Fact]
+    public void NullJson_ThrowsLayoutException()
+    {
+        Assert.Throws<LayoutException>(() => LayoutValidator.Validate(null!, "o"));
+    }
 }

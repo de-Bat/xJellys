@@ -24,22 +24,29 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
 
     private sealed record PendingChoice(Trigger Trigger, Dictionary<string, Offer> ByAction);
 
+    /// <summary>Playback state from the latest trigger. Unknown until the first trigger for the device.</summary>
+    private enum PlayState { Unknown, None, Playing, Paused }
+
     private sealed class DeviceState
     {
         public readonly object Gate = new();
         public PendingChoice? Pending;
         public string? SessionId;
         public long Generation; // bumped per trigger under Gate
+        public PlayState Play;
     }
 
     private readonly ConcurrentDictionary<string, Client> _clients = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, DeviceState> _devices = new(StringComparer.Ordinal);
 
+    /// <summary>'/' separates owner from id and "host*" is reserved, so no client can reach another owner's namespace.</summary>
+    public static bool IsValidClientId(string? clientId)
+        => !string.IsNullOrWhiteSpace(clientId) && !clientId.Contains('/')
+            && !clientId.StartsWith(HostOwner, StringComparison.OrdinalIgnoreCase);
+
     public bool Register(string clientId, string displayName, Func<string, Task<string?>> onEvent)
     {
-        // '/' separates owner from id and "host*" is reserved, so no client can reach another owner's namespace.
-        if (string.IsNullOrWhiteSpace(clientId) || clientId.Contains('/') || onEvent is null
-            || clientId.StartsWith(HostOwner, StringComparison.OrdinalIgnoreCase))
+        if (!IsValidClientId(clientId) || onEvent is null)
         {
             Log($"register rejected: invalid client id '{clientId}'");
             return false;
@@ -60,6 +67,12 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         {
             gen = ++st.Generation;
             st.SessionId = t.SessionId;
+            st.Play = t.Kind switch
+            {
+                TriggerKind.Pause or TriggerKind.DoublePause => PlayState.Paused,
+                TriggerKind.Stop => PlayState.None,
+                _ => PlayState.Playing,
+            };
             foreach (var l in queue.Shown(t.DeviceId).Where(l => l.CloseOn.Contains(name)))
             {
                 CloseLocked(st, t.DeviceId, l.Id);
@@ -183,6 +196,15 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         var st = State(deviceId);
         lock (st.Gate)
         {
+            // A layout meant to close on resume (or stop) that arrives after that already happened would
+            // never close by itself: reject it. Before the first trigger the state is unknown: allow.
+            if ((st.Play == PlayState.Playing && l.CloseOn.Contains("resume"))
+                || (st.Play == PlayState.None && l.CloseOn.Contains("stop")))
+            {
+                Log($"show rejected for {clientId}: {l.Id} is stale (closes on {(st.Play == PlayState.None ? "stop" : "resume")}, which already happened on {deviceId})");
+                return false;
+            }
+
             var shown = queue.Shown(deviceId);
             l = ResolveParent(l, clientId, shown);
             if (IsInteractive(l) && Holder(shown) is { } holder && holder.Id != l.Id

@@ -94,6 +94,42 @@ Each is a JSON string passed to the client's handler.
 
 `trigger` is one of `itemStart`, `pause`, `resume`, `doublePause`, `seek`, `stop`. A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or `null`. Other handler results are ignored; clients act through `Show` and `Close`.
 
+## Stale shows
+
+The host remembers each device's playback state from the latest trigger: paused after `pause` or `doublePause`, playing after `resume`, `itemStart` or `seek`, none after `stop`. `Show` returns `false` (and logs why) for a layout whose `closeOn` contains `resume` while the device is playing, or `stop` while nothing plays: that event already happened, so the layout would never close by itself. Before the first trigger for a device the state is unknown and every layout is allowed.
+
+## HTTP endpoints
+
+All need a Jellyfin token in the `Authorization` header. Poll, Event and Heartbeat return `403` unless the caller has a session on `deviceId` (administrators: any device with a session). Nothing logs headers or tokens.
+
+### `GET /JellyTvOverlay/Poll?deviceId=<id>&since=<seq>`
+
+Long-poll: answers as soon as there are ops after `since`, otherwise after at most 25 s.
+
+```json
+{"seq":7,"ops":[
+  {"seq":7,"op":"reset","layoutId":""},
+  {"seq":7,"op":"show","layoutId":"JellyXR/cast","layout":{"v":1,"id":"JellyXR/cast","owner":"JellyXR","...":"..."}}
+]}
+```
+
+- `seq`: pass it as `since` in the next poll. With no ops it equals the `since` you sent.
+- `op` is `show`, `close` or `reset`. `show` carries the validated `layout` (shown again with the same id = replace); `close` carries only `layoutId`.
+- `reset` starts every snapshot: close every window not in this snapshot (the `show` ops that follow, all with the same `seq`). A snapshot is sent for `since=0`, for a `since` above the server's head (server restarted) and for a `since` older than the retained log. On a device that never had a layout, `since=0` waits and then returns `{"seq":0,"ops":[]}`.
+- Layouts with `ttlMs` are closed by the host (a `close` op) when they expire.
+
+### `POST /JellyTvOverlay/Event`
+
+Body: an app event (see Events). `204` on success, `400` for malformed JSON or missing `deviceId`/`layoutId`, `403` when the caller may not use the device or `layoutId` is not currently shown there, `413` above 64 KB.
+
+### `POST /JellyTvOverlay/Heartbeat?deviceId=<id>`
+
+Send every 30 s while the app runs. Returns `{"enabled":bool,"protocol":1}`. `enabled` is `false` when the plugin or this device is switched off in the settings; then show nothing. A device counts as having the app (`OverlayHost.HasApp`) for 90 s after its last heartbeat.
+
+### `GET /JellyTvOverlay/Clients`, `GET /JellyTvOverlay/Devices`
+
+Administrators only; used by the settings page (registered client plugins; devices with a fresh heartbeat or switched off).
+
 ## Example: actor detail ("big card", layout B)
 
 A near full-screen card over the dimmed paused video. Left: portrait, name, birth info, scrollable bio. Right: a "In your library" poster row, and a quick description of the highlighted poster with a disabled Play button. Left/right/up/down are local focus moves; OK on a poster reports the `openTitle` action.

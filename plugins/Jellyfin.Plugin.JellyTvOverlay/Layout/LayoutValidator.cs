@@ -28,6 +28,19 @@ public static class LayoutValidator
 
     public static ValidatedLayout Validate(string json, string owner)
     {
+        try
+        {
+            return ValidateCore(json, owner);
+        }
+        catch (ArgumentException ex)
+        {
+            // Null json, or duplicate property names (JsonObject throws on first access, so anywhere in the walk).
+            throw new LayoutException("invalid JSON: " + ex.Message);
+        }
+    }
+
+    private static ValidatedLayout ValidateCore(string json, string owner)
+    {
         if (string.IsNullOrWhiteSpace(owner))
         {
             throw new LayoutException("owner is required");
