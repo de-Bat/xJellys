@@ -44,7 +44,7 @@ Plays a recap before an episode on **Android TV** (any remote-controllable clien
 
 - **New episode** → recap = tail of the previous N episodes (credits skipped).
 - **Resumed episode** → previous-episode recap + clips spread over the part of this episode already watched, ending at the resume point.
-- *Recap when resuming an episode* (global, overridable per show as *When resuming*): `Previous episodes + this episode so far` (default) | `Previous episodes only` (same recap as a fresh start, then the episode resumes at its position) | `This episode so far only`. The this-episode part is video clips, so a **Text** recap set to *this episode only* has nothing to show and is skipped.
+- *Recap when resuming an episode* (global, overridable per show as *When resuming*): `Previous episodes + this episode so far` (default) | `Previous episodes only` (same recap as a fresh start, then the episode resumes at its position) | `This episode so far only`. In **Text** recaps the this-episode part is dialogue cards (see below).
 
 Android TV cannot show plugin UI, so Jellycap builds a real video with ffmpeg and tells the TV session to play it, then returns to the episode (at the resume position).
 
@@ -54,8 +54,9 @@ Setup:
 3. Play an episode on Android TV. The recap for the *next* episode is pre-built, so it is instant when binging; the first episode waits up to `MaxWaitSeconds` for a build, else it just plays normally.
 
 Text recap (`Recap format` setting: `Video` | `Text` | `Both`):
-- **Text** = title cards ("Previously on …", then `S01E02 · Name` + episode summary from Jellyfin metadata) rendered by ffmpeg/libass, so right-to-left scripts (Hebrew, Arabic) shape correctly. Reading time scales with text length. A resumed episode gets the same cards as a new one (a spoiler-free recap of the watched part needs video).
-- **Both** = a card before each video clip.
+- **Text** = title cards ("Previously on …", then `S01E02 · Name` + episode summary from Jellyfin metadata) rendered by ffmpeg/libass, so right-to-left scripts (Hebrew, Arabic) shape correctly. Reading time scales with text length.
+- **Watched part of a resumed episode as text**: the summary would spoil the rest, so the cards quote the episode's **subtitles** instead: "Earlier in this episode", then one card per moment (`S01E03 · 12:34` + the last lines spoken there, up to 4), spread over the watched part like the clips (`ThisEpisodeClips` moments, 20 s of dialogue each, the last ending at the resume point). Uses a text subtitle track: full (not forced) tracks first, then one in the card language, then the default track. External `srt/vtt/ass/ssa` are read directly; embedded text tracks are extracted once with ffmpeg and cached (`<jellyfin cache>/jellycap-subtitles`). A track in another language is machine-translated when a translation server is set. No text subtitle track = no dialogue cards (a *this episode only* text recap is then skipped).
+- **Both** = a card before each video clip (for the watched part: the dialogue of that clip).
 - **Translation**: card labels are localized (`en he es fr de it pt ru ar`). Summaries are shown in the language stored in Jellyfin; set a *Translation server URL* (LibreTranslate compatible `POST /translate`) to machine-translate them to the chosen language. Translations are cached on disk; if the server is down the original text is used.
 - **JellyXR TV app** (1.1.0+ on the box, setting *Show text cards with the JellyXR TV app*, default on): the app draws the cards over the player instead of ffmpeg burning them into a video. **Text** = no recap video: the episode pauses, the cards show one after another, then it goes back to its start position and plays (press play to skip). **Both** = the clips-only recap video plays with each card over its clip. Without the app (or with JellyXR TV not running) recaps are videos as before.
 - **Fonts**: libass uses the server's fonts. Set *Text card font* to one that covers your language (e.g. `DejaVu Sans` on Linux for Hebrew; Windows `Arial` works).

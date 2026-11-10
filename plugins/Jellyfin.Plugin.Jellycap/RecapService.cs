@@ -57,12 +57,9 @@ public class RecapService
         return Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Text-only recaps have nothing to say about the watched part, so resume == new
-    /// (a this-episode-only text recap is left as is and comes out empty).
-    /// </summary>
+    /// <summary>A new-episode recap does not depend on the start position.</summary>
     private static (RecapMode Mode, TimeSpan Pos) Normalize(RecapMode mode, TimeSpan pos, RecapFormat fmt)
-        => mode == RecapMode.New || (fmt == RecapFormat.Text && mode == RecapMode.Resume) ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
+        => mode == RecapMode.New ? (RecapMode.New, TimeSpan.Zero) : (mode, pos);
 
     public string GetRecapPath(Episode ep, RecapMode mode, TimeSpan pos, RecapFormat fmt)
     {

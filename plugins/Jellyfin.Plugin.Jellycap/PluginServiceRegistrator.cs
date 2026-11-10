@@ -10,6 +10,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<TextTranslator>();
         serviceCollection.AddSingleton<TextCardFactory>();
+        serviceCollection.AddSingleton<EpisodeDialogue>();
         serviceCollection.AddSingleton<RecapPlanner>();
         serviceCollection.AddSingleton<FfmpegRecapBuilder>();
         serviceCollection.AddSingleton<RecapService>();
