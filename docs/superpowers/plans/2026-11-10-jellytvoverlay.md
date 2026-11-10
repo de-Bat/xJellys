@@ -26,6 +26,7 @@
 - Only one layout holds the remote per device at a time.
 - No remote `PlayNow` from SubSync (crashes Jellyfin for Android TV; see JellyXR TV 1.2.2).
 - Fallback when the host plugin is missing or the device has no app: JellyXR → `DisplayMessage` toasts, Jellycap → ffmpeg recap video, SubSync → nothing.
+- Security (spec "Security"): HTTPS with normal certificate validation, no trust-all; `http://` only to private/LAN hosts (RFC 1918, 169.254/16, `.local`, localhost, IPv6 ULA/link-local), shown as "Not secured (local network)"; bare host → try `https://` first. Token only in the `Authorization` header, never in URLs or logs. Image requests carry the token only to the server origin; other hosts must be `https` and get no token. Host endpoints serve only devices with a session of the calling user (admins: any).
 - Old JellyXR TV endpoints (`JellyXR/Cards`, `JellyXR/Companion/*`, `Jellycap/Overlay*`, `Jellycap/Companion/Heartbeat`, `JellySubSync/*` used by the app) stay working this release.
 
 ## Review Focus
@@ -256,7 +257,9 @@ A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or 
 - `SessionBridge : IHostedService` subscribes `PlaybackStart` / `PlaybackProgress` / `PlaybackStopped` and feeds `TriggerDetector` with `e.DeviceId`, `e.Session.Id`, `e.Session.UserId`, `e.Item.Id`, `e.IsPaused`, `e.PlaybackPositionTicks`. It also runs `queue.Tick()` every 500 ms.
 - Settings page: `Enabled` toggle, list of registered clients, list of devices with a fresh heartbeat, each with an on/off switch (config `string[] DisabledDevices`). A disabled device: `HasApp` → false (clients fall back), `Show` → false, and Heartbeat returns `enabled:false`.
 
-- [ ] **Step 1: Write failing tests:** `Register_BeforeStart_AppliedOnStart`; `HasApp_FalseAfter90s` (fake clock); `Show_Disabled_ReturnsFalse`; `DisabledDevice_HasAppFalse_ShowFalse`.
+- Authorization: `public static class DeviceAccess { public static bool CanUse(Guid userId, bool isAdmin, string deviceId, IEnumerable<(string DeviceId, Guid UserId)> sessions); }` (pure). Poll, Event and Heartbeat return 403 unless `CanUse` holds (user from `HttpContext.User` claims, sessions from `ISessionManager.Sessions`). Event also returns 403 if `layoutId` is not currently shown on that device. Nothing logs headers or the token.
+
+- [ ] **Step 1: Write failing tests:** `Register_BeforeStart_AppliedOnStart`; `HasApp_FalseAfter90s` (fake clock); `Show_Disabled_ReturnsFalse`; `DisabledDevice_HasAppFalse_ShowFalse`; `DeviceAccess_OtherUsersDevice_Denied`; `DeviceAccess_Admin_Allowed`; `DeviceAccess_NoSession_Denied`; `Event_LayoutNotShown_Rejected`.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS; `dotnet build` → 0 errors.
 - [ ] **Step 5: Manual check:** copy the DLL into a Jellyfin 10.9/10.10 test server, restart, and run `curl -H "Authorization: MediaBrowser Token=<t>" "<server>/JellyTvOverlay/Poll?deviceId=x&since=0"` → `{"seq":0,"ops":[]}` after ≤ 25 s. Pause a TV playback and confirm the plugin log shows the `pause` trigger.
 - [ ] **Step 6: Commit** `JellyTvOverlay: host API, session bridge and HTTP endpoints`.
@@ -294,13 +297,31 @@ A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or 
   - `JSONObject heartbeat(String deviceId) throws Exception`
   - `void playstate(String sessionId, String command) throws Exception` (`Pause`/`Unpause`/`PlayPause`/`Seek`)
 - `MainActivity` keeps sign-in, overlay permission, **Test panel** (now shows a bundled `res/raw/test_layout.json` through the renderer), and **Watch** picker. All text is renamed to JellyTvOverlay. The package is `com.xjellys.tvoverlay`, the APK is `build/jellytvoverlay.apk`.
+- Secure connections:
+  - `res/xml/network_security_config.xml`: base config with trust anchors `system` + `user` (no custom TrustManager anywhere) and `cleartextTrafficPermitted="true"`, wired in the manifest with `android:networkSecurityConfig`. The XML can't allow cleartext by IP range, and LAN addresses aren't known ahead, so the HTTP rule is enforced in code by the gate below. That gate is the real control.
+  - Pure class `src/com/xjellys/tvoverlay/model/ServerUrl.java`:
+    - `static String normalize(String input)`: bare host → `https://host` (port 8920 if none given). On a failed probe, `MainActivity` retries `http://host:8096` only if `isPrivate(host)`.
+    - `static boolean isPrivate(String host)`: literal IPs and `localhost`/`*.local`. No DNS resolution, so a public hostname is never private.
+    - `static boolean allowed(String url)`: https always; http only if `isPrivate`.
+  - `Api.open` throws `IOException("Plain HTTP is only allowed on the local network")` when `!ServerUrl.allowed(base)`.
+  - `MainActivity` shows "Not secured (local network)" under the server name for http.
+  - The token is sent only in the `Authorization: MediaBrowser … Token="…"` header. Remove any log lines that print URLs with the token.
+- App logo from `art/logo-source.jpg` (512×286 JPEG): a small `art/make_icons.py` (Pillow) writes:
+  - `res/drawable-xhdpi/banner.png` 320×180: cover-resize the whole image to 16:9.
+  - `res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi}/ic_launcher.png` 48/72/96/144 px: a square centre crop of 286×286 on the triangle, then resize.
+  - The generated PNGs are committed. The script is run by hand, not by `build.sh`.
 - `test.sh`: downloads `junit-platform-console-standalone-1.11.3.jar` and `json-20240303.jar` from Maven Central into `build/testlib` if missing, compiles `src/**/model` + `logic` classes and `test/**`, and runs the console launcher. Model and logic classes must not import `android.*`.
 
-- [ ] **Step 1: Port the files**, then rename package and strings.
-- [ ] **Step 2: Run** `bash apps/JellyTvOverlay/build.sh` → `built build/jellytvoverlay.apk`.
-- [ ] **Step 3: Run** `bash apps/JellyTvOverlay/test.sh` with `SmokeTest` (`assertTrue(true)`) → `1 tests successful`.
-- [ ] **Step 4: Manual check:** `adb install`, sign in with Quick Connect, allow the overlay, and see the Watch picker list the Jellyfin player.
-- [ ] **Step 5: Commit** `JellyTvOverlay app: scaffold, setup flow and JVM test harness`.
+- [ ] **Step 1: Write failing `test/com/xjellys/tvoverlay/model/ServerUrlTest.java`:**
+  - `bareHost_https8920`: `"jf.example.com"` → `"https://jf.example.com:8920"`
+  - `explicitHttp_kept`
+  - `isPrivate`: true for `192.168.1.5`, `10.0.0.2`, `172.16.4.1`, `169.254.1.1`, `localhost`, `nas.local`, `fd00::1`; false for `172.32.0.1`, `8.8.8.8`, `jf.example.com`
+  - `allowed`: `http://8.8.8.8:8096` false, `http://192.168.1.5:8096` true, `https://jf.example.com` true
+- [ ] **Step 2: Port the files**, then rename package and strings, add `ServerUrl`, the security config and the `Api.open` gate, and generate the icons with `python apps/JellyTvOverlay/art/make_icons.py`.
+- [ ] **Step 3: Run** `bash apps/JellyTvOverlay/build.sh` → `built build/jellytvoverlay.apk`.
+- [ ] **Step 4: Run** `bash apps/JellyTvOverlay/test.sh` → `ServerUrlTest` and `SmokeTest` pass.
+- [ ] **Step 5: Manual check:** `adb install`. The new logo shows in the TV launcher row. Sign in over HTTPS (and over LAN http, which shows "Not secured (local network)") with Quick Connect, allow the overlay, and see the Watch picker list the Jellyfin player. A public `http://` address is refused with the message above.
+- [ ] **Step 6: Commit** `JellyTvOverlay app: scaffold, setup flow and JVM test harness`.
 
 ### Task 8: Layout model and parser
 
@@ -352,7 +373,7 @@ A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or 
 - Produces:
   - `final class OverlayWindow { OverlayWindow(Context c, ImageCache images, Listener l); void show(Layout l); void close(); boolean interactive(); }` with `interface Listener { void onAction(Layout l, String action, String elementId, JSONObject values); void onClosed(Layout l, String reason); void onPassthrough(String key); }`
   - `final class Renderer { static View build(Context c, Node n, int screenW, int screenH, ImageCache images, ValueState values); }`
-  - `final class ImageCache { ImageCache(Api api, int maxBytes /* 24 MB */); void preload(String src); void into(ImageView v, String src); }`
+  - `final class ImageCache { ImageCache(Api api, int maxBytes /* 24 MB */); void preload(String src); void into(ImageView v, String src); }`. A `src` starting with `/` → server origin plus token header. An absolute URL with the same origin as the server → token. Another origin → only `https`, no token. Anything else (`http` to another host, `file:`, `content:`, `javascript:`) → ignored. The pure decision lives in `model/ImageSource.java` `static Kind classify(String src, String serverBase)` → `SERVER | EXTERNAL | REJECT`, tested in `ImageSourceTest` (`relative_server`, `sameOrigin_server`, `otherHttps_external`, `otherHttp_reject`, `fileScheme_reject`).
 - Window flags: `TYPE_APPLICATION_OVERLAY`. Passive layouts get `FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCHABLE`. Interactive layouts are focusable and handle `dispatchKeyEvent` through `FocusModel`; focus is shown as a 2 dp `#4AA3FF` outline plus a `#224AA3FF` fill (as in the mockup). `dim` = a full-screen `#000000` view with alpha `dim`. A text node with `dir:auto` uses `TextDirectionHeuristics.FIRSTSTRONG_LTR` and `View.LAYOUT_DIRECTION_LOCALE` → per node from the content (as `CastPanel` does for names today). One window per shown layout. Only one interactive window exists (enforced by the host; the app trusts it).
 - Pages and sequences re-render only their container. A sequence end → `onAction(l, finishedAction, null, values)`, then `onClosed(l, "finished")`. TTL → `onClosed(l, "ttl")`. BACK → `onClosed(l, "back")` (the host reopens the parent if any; the app only closes).
 

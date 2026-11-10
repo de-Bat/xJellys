@@ -222,6 +222,31 @@ user must stay as in JellyXR TV 1.2.2.
 - New release tags/workflow for the app following the existing `app-…` scheme; plugin added to
   `manifest.json` like the others.
 
+## Security (user requirement: secured connections)
+
+- **HTTPS first.** The app supports `https://` server addresses with normal certificate validation
+  (system trust store plus user-installed CAs, so self-signed home setups work once their CA is
+  installed on the box). No "trust all certificates" option.
+- **Plain HTTP only on the local network.** `http://` is allowed only for private/LAN addresses
+  (RFC 1918, link-local, `.local`, localhost). The app shows "Not secured (local network)" for those.
+  Public addresses must use HTTPS. If the user types a bare host, the app tries `https://` first.
+  *(my call; requiring HTTPS everywhere is a one-line change if wanted)*
+- **Token handling.** The access token only goes in the `Authorization` header (never in URLs),
+  is never logged, and is stored in app-private storage. Images: the token is sent only to the
+  configured server's origin; an absolute image URL to another host must be `https` and gets no
+  token.
+- **Server-side authorization.** All host endpoints need a signed-in user. Poll and Event only
+  serve a device that has a session belonging to the authenticated user (or an admin), so one
+  user can't read another user's overlays or send actions into them. Events can only target
+  layouts currently shown on that device.
+- **Layout content is data.** The app never runs scripts or opens URLs from a layout; `src` is
+  images only.
+
+## App logo
+
+Source art: `apps/JellyTvOverlay/art/logo-source.jpg` (from the user; 512×286 JPEG). TV banner
+(16:9) and launcher icon (square, centred crop on the triangle) are generated from it.
+
 ## Constraints
 
 - Jellyfin server: same target as existing plugins (net8.0, `Jellyfin.Controller` 10.9.x,
