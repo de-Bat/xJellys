@@ -84,6 +84,14 @@
     "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.JellyXR/XRayarr.png",
     "versions": [
       {
+        "version": "1.6.0.0",
+        "changelog": "1.6.0.0: X-Ray items are no longer added to an \"X-Ray\" collection; the collection earlier versions created is deleted on the first marker sync (the next playback or the \"Mark items with X-Ray data\" task). The \"X-Ray\" tag and the optional genre stay.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyXR-v1.6.0.0/Jellyfin.Plugin.JellyXR_1.6.0.0.zip",
+        "checksum": "61EB010404A7E772F6C97B9EFAEA78CA",
+        "timestamp": "2026-11-10T06:08:51Z"
+      },
+      {
         "version": "1.5.0.0",
         "changelog": "1.5.0.0: X-Ray markers. Movies and episodes with X-Ray data get an \"X-Ray\" tag and join an \"X-Ray\" collection, so the Android TV app (which can't show plugin UI) shows which items have X-Ray: Collections -> X-Ray, or filter by tag. Optional: also add \"X-Ray\" as a genre so it shows on the TV movie page. New scheduled task \"Mark items with X-Ray data\" (daily 05:00). Settings: Mark items, Also add as genre, Marker name.",
         "targetAbi": "10.9.0.0",
