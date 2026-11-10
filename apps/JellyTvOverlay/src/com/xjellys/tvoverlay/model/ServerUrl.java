@@ -13,8 +13,15 @@ public final class ServerUrl {
         while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
         if (s.isEmpty()) return s;
         if (s.contains("://")) return s;
+        String a = authority(s);
+        int colons = a.length() - a.replace(":", "").length();
+        if (!a.startsWith("[") && colons >= 2) {
+            // bare IPv6 literal: bracket it, no port can be told apart
+            s = "[" + a + "]" + s.substring(a.length());
+            a = "[" + a + "]";
+        }
         s = "https://" + s;
-        if (!hasPort(authority(s))) s += ":8920";
+        if (!hasPort(a)) s += ":8920";
         return s;
     }
 
@@ -82,6 +89,7 @@ public final class ServerUrl {
         for (int i = 0; i < 4; i++) {
             if (p[i].isEmpty() || p[i].length() > 3) return false;
             for (int k = 0; k < p[i].length(); k++) if (p[i].charAt(k) < '0' || p[i].charAt(k) > '9') return false;
+            if (p[i].length() > 1 && p[i].charAt(0) == '0') return false; // octal ambiguity
             o[i] = Integer.parseInt(p[i]);
             if (o[i] > 255) return false;
         }

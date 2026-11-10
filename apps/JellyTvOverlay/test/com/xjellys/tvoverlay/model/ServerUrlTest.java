@@ -64,4 +64,29 @@ public class ServerUrlTest {
         assertNull(ServerUrl.httpFallback("https://jf.example.com:8920"));
         assertNull(ServerUrl.httpFallback("http://192.168.1.10:8096"));
     }
+
+    @Test
+    public void tricky_hosts_not_private() {
+        String[] no = {"::ffff:8.8.8.8", "localhost.evil.com", "evil.local.com", "010.1.1.1", "172.017.0.1",
+            "192.168.01.5", "10.0.0.02", "192.168.1"};
+        for (String h : no) assertFalse(ServerUrl.isPrivate(h), h);
+    }
+
+    @Test
+    public void tricky_urls() {
+        assertFalse(ServerUrl.allowed("HTTP://8.8.8.8"));
+        assertTrue(ServerUrl.allowed("HTTP://NAS.LOCAL:8096"));
+        assertTrue(ServerUrl.allowed("http://192.168.1.5:8096"));
+        assertTrue(ServerUrl.allowed("HTTPS://jf.example.com"));
+        assertFalse(ServerUrl.allowed("https://user@host"));
+        assertFalse(ServerUrl.allowed("http://192.168.1.5@evil.com"));
+        assertTrue(ServerUrl.allowed("http://[fd00::1]:8096"));
+        assertFalse(ServerUrl.allowed("http://[2001:db8::1]:8096"));
+    }
+
+    @Test
+    public void normalize_bareIpv6() {
+        assertEquals("https://[fd00::1]:8920", ServerUrl.normalize("fd00::1"));
+        assertEquals("https://[fd00::1]:8096", ServerUrl.normalize("[fd00::1]:8096"));
+    }
 }

@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 
 VERSION="${VERSION:-0.0.0-dev}"
 # 1.2.3 -> 10203; dev builds -> 1
-CODE="$(echo "$VERSION" | awk -F'[.-]' '/^[0-9]+\.[0-9]+\.[0-9]+/ { print $1*10000 + $2*100 + $3; next } { print 1 }')"
+CODE="$(echo "$VERSION" | awk -F'[.-]' '/^[0-9]+\.[0-9]+\.[0-9]+$/ { print $1*10000 + $2*100 + $3; next } { print 1 }')"
 
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${LOCALAPPDATA:-$HOME}/Android/Sdk}}"
 BT="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)"

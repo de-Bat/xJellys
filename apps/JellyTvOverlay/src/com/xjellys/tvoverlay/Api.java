@@ -98,8 +98,11 @@ final class Api {
         } catch (HttpError e) {
             throw e;
         } catch (IOException e) {
-            // a pooled keep-alive connection the server already closed: retry reads once on a fresh one
-            if (!"GET".equals(method)) throw e;
+            // a pooled keep-alive connection the server already closed: retry idempotent GETs once on a fresh one.
+            // Not the HTTP gate, not timeouts (long polls), not refused connections.
+            boolean stale = e instanceof java.io.EOFException
+                || (e instanceof java.net.SocketException && !(e instanceof java.net.ConnectException));
+            if (!"GET".equals(method) || !stale) throw e;
             return callOnce(method, path, jsonBody, readMs);
         }
     }
@@ -245,7 +248,8 @@ final class Api {
             s.receive(p);
             JSONObject o = new JSONObject(new String(p.getData(), 0, p.getLength(), StandardCharsets.UTF_8));
             String addr = o.optString("Address", "");
-            return addr.isEmpty() ? null : addr;
+            // a reply naming a public http host (or anything unsafe) is discarded
+            return addr.isEmpty() || !ServerUrl.allowed(ServerUrl.normalize(addr)) ? null : addr;
         } catch (SocketTimeoutException e) {
             return null;
         } catch (Exception e) {
