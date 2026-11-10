@@ -3,7 +3,6 @@ package com.xjellys.tvoverlay.logic;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 
 import com.xjellys.tvoverlay.model.Layout;
@@ -32,30 +31,35 @@ public final class PreloadCache {
 
     /** Caches the preload entries of a shown layout: raw = its JSON, parsed = Layout.parse(raw). */
     public void addFrom(JSONObject raw, Layout parsed) {
-        JSONArray pre = raw == null ? null : raw.optJSONArray("preload");
-        if (pre == null || parsed == null) return;
-        for (int i = 0; i < pre.length(); i++) {
-            JSONObject po = pre.optJSONObject(i);
-            if (po == null) continue;
-            Object id = po.opt("id");
-            if (!(id instanceof String)) continue;
-            for (Layout l : parsed.preload) {
-                if (id.equals(l.id)) {
-                    byId.remove(l.id);
-                    byId.put(l.id, new Entry(Canon.of(po), l));
-                    break;
-                }
-            }
+        addFrom(PreparedShow.of(raw), parsed);
+    }
+
+    /**
+     * Caches the preload entries of a shown layout, with the canonical JSON computed off the main thread.
+     * shown = the Layout actually shown (p.layout, or a cached one with the same JSON).
+     */
+    public void addFrom(PreparedShow p, Layout shown) {
+        if (p == null || shown == null) return;
+        for (Layout l : shown.preload) {
+            String canon = p.preloadCanons.get(l.id);
+            if (canon == null) continue;
+            byId.remove(l.id);
+            byId.put(l.id, new Entry(canon, l));
         }
         while (byId.size() > max) byId.remove(byId.keySet().iterator().next());
     }
 
     /** The cached Layout for this show JSON when its id is cached with identical JSON, else null. */
     public Layout take(JSONObject layoutJson) {
-        Object id = layoutJson == null ? null : layoutJson.opt("id");
+        return layoutJson == null ? null : take(PreparedShow.of(layoutJson));
+    }
+
+    /** As take(JSONObject), with the canonical JSON already computed. */
+    public Layout take(PreparedShow p) {
+        Object id = p == null || p.json == null ? null : p.json.opt("id");
         if (!(id instanceof String)) return null;
         Entry e = byId.get(id);
-        return e != null && e.canon.equals(Canon.of(layoutJson)) ? e.layout : null;
+        return e != null && e.canon.equals(p.canon) ? e.layout : null;
     }
 
     public int size() {

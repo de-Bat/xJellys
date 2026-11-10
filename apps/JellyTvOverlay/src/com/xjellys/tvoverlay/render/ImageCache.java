@@ -22,13 +22,15 @@ import java.util.concurrent.ThreadFactory;
 import javax.net.ssl.HttpsURLConnection;
 
 import com.xjellys.tvoverlay.Api;
+import com.xjellys.tvoverlay.logic.FetchQueue;
 import com.xjellys.tvoverlay.model.ImageSource;
 
 /**
  * Decoded bitmaps by src, bounded in bytes (LRU). Fetch rules come from {@link ImageSource}: SERVER through
  * {@link Api} (HTTP gate, token header, no redirects); EXTERNAL with a plain https connection that carries no
  * Authorization header and follows no redirects; REJECT leaves the view empty. Decoding is subsampled to the
- * view's target size. Call from the main thread; network and decoding run on a small pool.
+ * view's target size. Call from the main thread; network and decoding run on a small pool. Fetches wait in a
+ * {@link FetchQueue}: view-bound loads go before queued preloads, and a closed window's queued preloads are dropped.
  */
 public final class ImageCache {
     private static final int MAX_DOWNLOAD = 8 * 1024 * 1024;
@@ -38,7 +40,27 @@ public final class ImageCache {
     private final Api api;
     private final LruCache<String, Bitmap> cache;
     private final Handler main = new Handler(Looper.getMainLooper());
+    /** Queued or running fetches by src, with the views waiting for them (main thread). */
     private final Map<String, List<ImageView>> waiting = new HashMap<String, List<ImageView>>();
+    private final FetchQueue<Req> queue = new FetchQueue<Req>();
+
+    private static final class Req {
+        final ImageSource.Kind kind;
+        final int tw, th;
+
+        Req(ImageSource.Kind kind, int tw, int th) {
+            this.kind = kind;
+            this.tw = tw;
+            this.th = th;
+        }
+    }
+
+    private final Runnable drainOne = new Runnable() {
+        @Override public void run() {
+            FetchQueue.Item<Req> it = queue.next();
+            if (it != null) fetch(it.key, it.payload);
+        }
+    };
     private final ExecutorService pool = Executors.newFixedThreadPool(3, new ThreadFactory() {
         @Override public Thread newThread(Runnable r) {
             Thread t = new Thread(r, "overlay-images");
@@ -63,10 +85,21 @@ public final class ImageCache {
         cache.evictAll();
     }
 
-    /** Fetches and decodes src into the cache without a view (so a later show is instant). */
-    public void preload(String src) {
+    /**
+     * Fetches and decodes src into the cache without a view (so a later show is instant). group = the layout id
+     * of the window that carried the preload; {@link #dropPreloads} cancels the ones still queued.
+     */
+    public void preload(String src, String group) {
         if (src == null || src.isEmpty() || cache.get(src) != null) return;
-        load(src, DEFAULT_TARGET, DEFAULT_TARGET, null);
+        load(src, DEFAULT_TARGET, DEFAULT_TARGET, null, group);
+    }
+
+    /** The window of layout group closed (or was replaced): its preloads not yet started are dropped. */
+    public void dropPreloads(String group) {
+        for (String src : queue.dropGroup(group)) {
+            List<ImageView> w = waiting.get(src);
+            if (w == null || w.isEmpty()) waiting.remove(src);
+        }
     }
 
     /** Shows src in v when it arrives; v stays empty for a rejected or failed src. Target size = v's layout params. */
@@ -82,38 +115,45 @@ public final class ImageCache {
         ViewGroup.LayoutParams lp = v.getLayoutParams();
         int tw = lp != null && lp.width > 0 ? lp.width : DEFAULT_TARGET;
         int th = lp != null && lp.height > 0 ? lp.height : DEFAULT_TARGET;
-        load(src, tw, th, v);
+        load(src, tw, th, v, null);
     }
 
-    private void load(final String src, final int tw, final int th, ImageView v) {
-        List<ImageView> w = waiting.get(src);
-        if (w != null) {
-            if (v != null) w.add(v);
-            return;
-        }
+    private void load(final String src, int tw, int th, ImageView v, String group) {
         final ImageSource.Kind kind = ImageSource.classify(src, api == null ? null : api.base());
         if (kind == ImageSource.Kind.REJECT) return;
+        List<ImageView> w = waiting.get(src);
+        if (w != null) {
+            if (v != null) {
+                w.add(v);
+                queue.promote(src, new Req(kind, tw, th)); // a queued preload now has a view: fetch it first
+            }
+            return;
+        }
         w = new ArrayList<ImageView>();
         if (v != null) w.add(v);
         waiting.put(src, w);
-        pool.execute(new Runnable() {
-            @Override public void run() {
-                Bitmap b = null;
-                try {
-                    byte[] d = kind == ImageSource.Kind.SERVER
-                        ? api.image(ImageSource.serverPath(src, api.base()), MAX_DOWNLOAD)
-                        : external(src);
-                    if (d != null) b = decode(d, tw, th);
-                } catch (Exception e) {
-                    b = null; // no image; never log the URL (it may carry ids)
-                } catch (OutOfMemoryError e) {
-                    b = null;
-                }
-                final Bitmap fb = b;
-                main.post(new Runnable() {
-                    @Override public void run() { deliver(src, fb); }
-                });
-            }
+        Req r = new Req(kind, tw, th);
+        if (v != null) queue.addForeground(src, r); else queue.addPreload(src, r, group);
+        // one worker run per queued fetch; each takes the most urgent one at the time it runs
+        pool.execute(drainOne);
+    }
+
+    /** Worker thread. */
+    private void fetch(final String src, Req r) {
+        Bitmap b = null;
+        try {
+            byte[] d = r.kind == ImageSource.Kind.SERVER
+                ? api.image(ImageSource.serverPath(src, api.base()), MAX_DOWNLOAD)
+                : external(src);
+            if (d != null) b = decode(d, r.tw, r.th);
+        } catch (Exception e) {
+            b = null; // no image; never log the URL (it may carry ids)
+        } catch (OutOfMemoryError e) {
+            b = null;
+        }
+        final Bitmap fb = b;
+        main.post(new Runnable() {
+            @Override public void run() { deliver(src, fb); }
         });
     }
 

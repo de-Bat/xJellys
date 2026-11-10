@@ -176,11 +176,21 @@ public sealed class Dispatcher(OverlayQueue queue, TimeProvider clock, Action<st
         await Task.WhenAll(pending.ToArray()).ConfigureAwait(false);
     }
 
+    /// <summary>Largest layout JSON (UTF-8 bytes, preloads included) Show accepts.</summary>
+    public const int MaxLayoutBytes = 1024 * 1024;
+
     public bool Show(string clientId, string deviceId, string layoutJson)
     {
         if (!_clients.ContainsKey(clientId))
         {
             Log($"show rejected: unknown client '{clientId}'");
+            return false;
+        }
+
+        var bytes = layoutJson is null ? 0 : System.Text.Encoding.UTF8.GetByteCount(layoutJson);
+        if (bytes > MaxLayoutBytes)
+        {
+            Log($"show rejected for {clientId}: layout too large ({bytes} bytes, max {MaxLayoutBytes})");
             return false;
         }
 

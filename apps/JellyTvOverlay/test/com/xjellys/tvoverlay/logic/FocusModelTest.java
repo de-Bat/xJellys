@@ -219,4 +219,55 @@ public class FocusModelTest {
         assertFalse(FocusModel.visibleFor(d, null));
         assertTrue(FocusModel.visibleFor(plain, null));
     }
+    private static String scrollText(String id) {
+        return "{\"type\":\"text\",\"id\":\"" + id + "\",\"text\":\"long\",\"scroll\":true,\"focusable\":true}";
+    }
+
+    /** Probe that says the text can still scroll in dir while more[0] is true. */
+    private static FocusModel.ScrollProbe probe(final String dir, final boolean[] more) {
+        return new FocusModel.ScrollProbe() {
+            @Override public boolean canScroll(String id, String d) {
+                return "bio".equals(id) && dir.equals(d) && more[0];
+            }
+        };
+    }
+
+    @Test
+    public void scrollText_consumesDownUntilEnd_thenMoves() throws Exception {
+        Layout l = lay("interactive", null, "[" + scrollText("bio") + "," + btn("a", "x") + "]");
+        boolean[] more = {true};
+        FocusModel f = new FocusModel(l, rects("bio", r(0, 0, 100, 50), "a", r(0, 100, 100, 150)), probe("down", more));
+        assertEquals("bio", f.focused());
+
+        assertEquals(FocusModel.Kind.NONE, f.onKey("down").kind); // the window scrolls the bio
+        assertEquals("bio", f.focused());
+        more[0] = false; // at the end
+        FocusModel.Result res = f.onKey("down");
+        assertEquals(FocusModel.Kind.MOVED, res.kind);
+        assertEquals("a", f.focused());
+    }
+
+    @Test
+    public void scrollText_consumesUpUntilTop_thenMoves() throws Exception {
+        // bio first in document order (initial focus) but below the button
+        Layout l = lay("interactive", null, "[" + scrollText("bio") + "," + btn("a", "x") + "]");
+        boolean[] more = {true};
+        FocusModel f = new FocusModel(l, rects("bio", r(0, 100, 100, 150), "a", r(0, 0, 100, 50)), probe("up", more));
+        assertEquals("bio", f.focused());
+
+        assertEquals(FocusModel.Kind.NONE, f.onKey("up").kind);
+        assertEquals("bio", f.focused());
+        // down cannot scroll (probe says only up) and nothing is below: still NONE, focus stays
+        assertEquals(FocusModel.Kind.NONE, f.onKey("down").kind);
+        more[0] = false;
+        assertEquals(FocusModel.Kind.MOVED, f.onKey("up").kind);
+        assertEquals("a", f.focused());
+    }
+
+    @Test
+    public void scrollText_withoutProbe_movesFirst() throws Exception {
+        Layout l = lay("interactive", null, "[" + scrollText("bio") + "," + btn("a", "x") + "]");
+        FocusModel f = new FocusModel(l, rects("bio", r(0, 0, 100, 50), "a", r(0, 100, 100, 150)));
+        assertEquals(FocusModel.Kind.MOVED, f.onKey("down").kind);
+    }
 }

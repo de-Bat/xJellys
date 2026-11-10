@@ -649,4 +649,22 @@ public class DispatcherTests
         Assert.True(d.Show("a", Dev, Layout("cast", closeOn: "[\"resume\",\"stop\"]")));
         Assert.Single(q.Shown(Dev));
     }
+    [Fact]
+    public void Show_RejectsLayoutOverOneMegabyte()
+    {
+        var (d, q, _, log) = Make();
+        d.Register("a", "A", new FakeClient().Handler);
+        string Big(int textChars) => new JsonObject
+        {
+            ["v"] = 1,
+            ["id"] = "big",
+            ["root"] = new JsonObject { ["type"] = "text", ["text"] = new string('x', textChars) },
+        }.ToJsonString();
+
+        Assert.False(d.Show("a", Dev, Big(Dispatcher.MaxLayoutBytes)));
+        Assert.Empty(q.Shown(Dev));
+        Assert.Contains(log, l => l.Contains("too large"));
+
+        Assert.True(d.Show("a", Dev, Big(Dispatcher.MaxLayoutBytes - 200)));
+    }
 }

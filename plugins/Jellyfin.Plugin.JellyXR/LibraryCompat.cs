@@ -37,8 +37,8 @@ internal static class LibraryCompat
 
     /// <summary>
     /// Scopes the query to the user (library access, parental rating, blocked tags), as new InternalItemsQuery(user)
-    /// does: SetUser(user) when present, else the User property. Throws when neither binds, so a query never runs
-    /// unscoped.
+    /// does: SetUser(user), then the User property (library access). Throws when either does not bind, so a query
+    /// never runs unscoped.
     /// </summary>
     public static InternalItemsQuery ForUser(this InternalItemsQuery query, object user)
     {
@@ -46,12 +46,18 @@ internal static class LibraryCompat
         _setUser ??= typeof(InternalItemsQuery).GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .FirstOrDefault(m => m.Name == "SetUser" && m.GetParameters() is [var p] && p.ParameterType.IsInstanceOfType(user));
         _userProperty ??= typeof(InternalItemsQuery).GetProperty("User", BindingFlags.Public | BindingFlags.Instance);
+        if (_setUser is null)
+        {
+            // without SetUser the parental rating and tag limits would not apply: fail closed
+            throw new MissingMemberException(typeof(InternalItemsQuery).FullName, "SetUser");
+        }
+
         if (_userProperty is null || !_userProperty.CanWrite || !_userProperty.PropertyType.IsInstanceOfType(user))
         {
             throw new MissingMemberException(typeof(InternalItemsQuery).FullName, "User");
         }
 
-        _setUser?.Invoke(query, new[] { user });
+        _setUser.Invoke(query, new[] { user });
         _userProperty.SetValue(query, user);
         return query;
     }

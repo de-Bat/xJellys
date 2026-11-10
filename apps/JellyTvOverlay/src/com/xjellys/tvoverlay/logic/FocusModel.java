@@ -25,11 +25,19 @@ import com.xjellys.tvoverlay.model.Node;
  * BACK, {@code play} gives PASSTHROUGH in passthrough layouts. Anything else is NONE. Focusable
  * nodes without an id or without a rect are skipped.
  *
+ * <p>Scroll texts: with a {@link ScrollProbe}, up/down on a focused {@code scroll} text that can still
+ * scroll that way give NONE (the window scrolls it); at its end, focus moves as usual.
+ *
  * <p>{@code showFor}: a node naming an element id is visible only while that element has focus
  * ({@link #visible(Node)}). Focusable nodes inside such a node are never focus targets, since they may be hidden.
  */
 public final class FocusModel {
     public enum Kind { MOVED, STEPPED, ACTION, BACK, PASSTHROUGH, NONE }
+
+    /** Whether the scroll text with this id can still scroll in dir ("up" or "down"). */
+    public interface ScrollProbe {
+        boolean canScroll(String id, String dir);
+    }
 
     public static final class Result {
         public final Kind kind;
@@ -52,12 +60,18 @@ public final class FocusModel {
 
     private final Layout layout;
     private final Map<String, float[]> rects;
+    private final ScrollProbe probe;
     private final List<Node> order = new ArrayList<Node>();
     private Node focused;
 
     public FocusModel(Layout l, Map<String, float[]> rects) {
+        this(l, rects, null);
+    }
+
+    public FocusModel(Layout l, Map<String, float[]> rects, ScrollProbe probe) {
         this.layout = l;
         this.rects = rects;
+        this.probe = probe;
         if (l.root != null) collect(l.root);
         if (!order.isEmpty()) focused = order.get(0);
     }
@@ -106,6 +120,8 @@ public final class FocusModel {
         }
         boolean horizontal = "left".equals(key) || "right".equals(key);
         if (horizontal || "up".equals(key) || "down".equals(key)) {
+            boolean scrollText = focused != null && "text".equals(focused.type) && focused.scroll();
+            if (!horizontal && scrollText && probe != null && probe.canScroll(fid, key)) return NONE;
             Node next = nearest(key);
             if (next != null) {
                 focused = next;

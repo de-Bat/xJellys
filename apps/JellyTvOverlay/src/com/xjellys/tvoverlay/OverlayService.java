@@ -32,6 +32,7 @@ import com.xjellys.tvoverlay.logic.OverlayEvents;
 import com.xjellys.tvoverlay.logic.PlayPosition;
 import com.xjellys.tvoverlay.logic.PollPlan;
 import com.xjellys.tvoverlay.logic.PreloadCache;
+import com.xjellys.tvoverlay.logic.PreparedShow;
 import com.xjellys.tvoverlay.logic.SessionPicker;
 import com.xjellys.tvoverlay.model.Layout;
 import com.xjellys.tvoverlay.render.ImageCache;
@@ -374,7 +375,7 @@ public class OverlayService extends Service {
                     overlays.close(st.id);
                     break;
                 case SHOW:
-                    show(st.layout);
+                    show(st.prepared);
                     break;
                 default:
                     break;
@@ -382,15 +383,16 @@ public class OverlayService extends Service {
         }
     }
 
-    private void show(JSONObject json) {
-        Layout l = preloads.take(json);
-        try {
-            if (l == null) l = Layout.parse(json);
-        } catch (JSONException e) {
-            Log.w(TAG, "layout dropped: " + e.getMessage());
+    /** Main thread: parsing and canonical JSON were done on the poll thread (PollPlan). */
+    private void show(PreparedShow p) {
+        if (p == null) return;
+        Layout l = preloads.take(p);
+        if (l == null) l = p.layout;
+        if (l == null) {
+            Log.w(TAG, "layout dropped: " + p.error);
             return;
         }
-        preloads.addFrom(json, l);
+        preloads.addFrom(p, l);
         try {
             overlays.show(l);
         } catch (RuntimeException e) {

@@ -257,6 +257,14 @@ public final class OverlayWindow {
 
     // ---- focus ----
 
+    /** From the ScrollView extent: whether a scroll text can still move its content up (-1) or down (+1). */
+    private final FocusModel.ScrollProbe scrollProbe = new FocusModel.ScrollProbe() {
+        @Override public boolean canScroll(String id, String dir) {
+            ScrollView sv = refs == null ? null : refs.scrollTexts.get(id);
+            return sv != null && sv.canScrollVertically("down".equals(dir) ? 1 : -1);
+        }
+    };
+
     private void rebuildFocus() {
         Map<String, float[]> rects = new HashMap<String, float[]>();
         for (Map.Entry<String, View> e : refs.focusables.entrySet()) {
@@ -264,7 +272,7 @@ public final class OverlayWindow {
             if (v.isShown() && v.getWidth() > 0) rects.put(e.getKey(), rectOf(v));
         }
         String keep = focusedId;
-        fm = new FocusModel(layout, rects);
+        fm = new FocusModel(layout, rects, scrollProbe);
         if (keep != null) fm.setFocused(keep);
         applyFocus(fm.focused());
     }

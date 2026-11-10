@@ -12,7 +12,8 @@ import org.json.JSONObject;
 /**
  * What to do with one Poll response, in order: reset (close every window not in {@code keep}), show (show or
  * replace by id) or close. A reset keeps the ids of the show ops that follow it with the same seq (the snapshot).
- * Malformed ops are skipped. {@code seq} is the next {@code since}.
+ * Malformed ops are skipped. {@code seq} is the next {@code since}. Show layouts are parsed here
+ * ({@link Step#prepared}), so building the plan on the poll thread keeps parsing off the main thread.
  */
 public final class PollPlan {
     public enum Kind { RESET, SHOW, CLOSE }
@@ -25,12 +26,15 @@ public final class PollPlan {
         public final JSONObject layout;
         /** Ids to keep (RESET only). */
         public final Set<String> keep;
+        /** The layout parsed and canonicalized on the thread that built the plan (SHOW only). */
+        public final PreparedShow prepared;
 
         Step(Kind kind, String id, JSONObject layout, Set<String> keep) {
             this.kind = kind;
             this.id = id;
             this.layout = layout;
             this.keep = keep;
+            this.prepared = layout == null ? null : PreparedShow.of(layout);
         }
     }
 

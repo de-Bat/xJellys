@@ -147,7 +147,13 @@ public class OverlayClientHostTests
     }
 
     private static string Detail(Guid person) =>
-        ActorDetailBuilder.Build(new PersonInfo(person, "Ada", null, null, null), Array.Empty<LibraryTitle>()).ToJsonString();
+        ActorDetailBuilder.Build(Person(person)!.Value.Person, Array.Empty<LibraryTitle>()).ToJsonString(OverlayJson.Options);
+
+    private static (PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)? Person(Guid person, int titles = 0) =>
+        (new PersonInfo(person, "גל גדות", null, null, null),
+            Enumerable.Range(0, titles).Select(i => new LibraryTitle(Guid.NewGuid(), "T" + i, 2000 + i, "Movie", null, null, null, null)).ToList());
+
+    private static Task<(PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)?> Loaded(Guid person) => Task.FromResult(Person(person));
 
     private static string ActorAction(Guid person, string layoutId = "JellyXR/cast") =>
         $"{{\"type\":\"action\",\"deviceId\":\"d1\",\"sessionId\":\"s1\",\"layoutId\":\"{layoutId}\",\"action\":\"actor:{person:N}\",\"elementId\":\"p0\",\"value\":{{}}}}";
@@ -167,13 +173,13 @@ public class OverlayClientHostTests
         host.PreloadWait = TimeSpan.FromMilliseconds(150);
         var a = Guid.NewGuid();
         var b = Guid.NewGuid();
-        var slow = new TaskCompletionSource<string?>();
-        host.BuildDetail = (p, _, _, _) => p == a ? Task.FromResult<string?>(Detail(a)) : slow.Task;
+        var slow = new TaskCompletionSource<(PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)?>();
+        host.LoadPerson = (p, _, _, _) => p == a ? Loaded(a) : slow.Task;
 
         var preload = await host.PreloadAsync("d1", new[] { a, b }, "u1", Guid.NewGuid());
 
         Assert.Single(preload);
-        Assert.Equal(Detail(a), preload[0]!.ToJsonString());
+        Assert.Equal(Detail(a), preload[0]!.ToJsonString(OverlayJson.Options));
 
         // the cast layout carrying it passes the host's validator
         var cast = CastLayoutBuilder.Build(new CardSet("Cast", new[] { new Card("Ada", null, PersonId: a), new Card("Bob", null, PersonId: b) }), interactive: true);
@@ -188,7 +194,7 @@ public class OverlayClientHostTests
         // not ready in time: shown when its build finishes
         Assert.Null(await host.OnEventAsync(ActorAction(b)));
         Assert.Single(_shows);
-        slow.SetResult(Detail(b));
+        slow.SetResult(Person(b));
         await WaitForShows(2);
         Assert.Equal(new[] { Detail(a), Detail(b) }, _shows);
     }
@@ -199,21 +205,24 @@ public class OverlayClientHostTests
         var host = NewHost();
         var running = 0;
         var max = 0;
-        host.BuildDetail = async (p, _, _, _) =>
+        host.LoadPerson = async (p, _, _, _) =>
         {
             var now = Interlocked.Increment(ref running);
             InterlockedMax(ref max, now);
             await Task.Delay(20);
             Interlocked.Decrement(ref running);
-            return Detail(p);
+            return Person(p);
         };
 
         var people = Enumerable.Range(0, 20).Select(_ => Guid.NewGuid()).ToList();
         var preload = await host.PreloadAsync("d1", people, "u1", Guid.NewGuid());
 
-        Assert.Equal(20, preload.Count);
         Assert.InRange(max, 1, 8);
-        Assert.Equal(people.Select(Detail), preload.Select(p => p!.ToJsonString()));
+
+        // capped at 16 preloads, in panel order
+        Assert.Equal(OverlayClientHost.MaxPreloads, preload.Count);
+        Assert.Equal(16, OverlayClientHost.MaxPreloads);
+        Assert.Equal(people.Take(16).Select(p => "actor:" + p.ToString("N")), preload.Select(p => p!["id"]!.GetValue<string>()));
     }
 
     private static void InterlockedMax(ref int target, int value)
@@ -229,7 +238,7 @@ public class OverlayClientHostTests
     {
         var host = NewHost();
         var a = Guid.NewGuid();
-        host.BuildDetail = (p, _, _, _) => Task.FromResult<string?>(Detail(p));
+        host.LoadPerson = (p, _, _, _) => Loaded(p);
         await host.PreloadAsync("d1", new[] { a }, "u1", Guid.NewGuid());
 
         await host.OnEventAsync(ActorAction(Guid.NewGuid()));
@@ -244,7 +253,7 @@ public class OverlayClientHostTests
     {
         var host = NewHost();
         var a = Guid.NewGuid();
-        host.BuildDetail = (p, _, _, _) => Task.FromResult<string?>(Detail(p));
+        host.LoadPerson = (p, _, _, _) => Loaded(p);
         await host.PreloadAsync("d1", new[] { a }, "u1", Guid.NewGuid());
 
         await host.OnEventAsync(Trigger("resume"));
@@ -272,5 +281,74 @@ public class OverlayClientHostTests
         var json = Trigger("doublePause").Replace("\"userId\":\"u1\"", "\"userId\":\"user-7\"");
         await host.OnEventAsync(json);
         Assert.Equal("user-7", host.UserOf("d1"));
+    }
+    [Fact]
+    public async Task InteractiveCastJson_CarriesActorPreloads_TitlesCapped()
+    {
+        var host = NewHost();
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        host.LoadPerson = (p, user, _, _) =>
+        {
+            Assert.Equal("u1", user);
+            return Task.FromResult(Person(p, titles: 30));
+        };
+        var set = new CardSet("Cast", new[] { new Card("Ada", null, PersonId: a), new Card("Bob", null, PersonId: b), new Card("Cy", null) });
+
+        var json = await host.CastJsonAsync("d1", set, interactive: true, overlaySeconds: 0, itemId: Guid.NewGuid(), userId: "u1");
+
+        var layout = JsonNode.Parse(json)!.AsObject();
+        var preload = layout["preload"]!.AsArray();
+        Assert.Equal(new[] { "actor:" + a.ToString("N"), "actor:" + b.ToString("N") }, preload.Select(p => p!["id"]!.GetValue<string>()));
+        foreach (var p in preload)
+        {
+            var list = Walk(p!["root"]).Single(n => n["type"]?.GetValue<string>() == "list");
+            Assert.Equal(OverlayClientHost.PreloadTitles, list["children"]!.AsArray().Count);
+        }
+
+        Assert.Equal(20, OverlayClientHost.PreloadTitles);
+        Assert.Contains("גל גדות", json); // Hebrew as UTF-8, not \u escapes
+        LayoutValidator.Validate(json, "JellyXR");
+
+        // OK on the actor shows a JSON string equal to the preloaded one
+        await host.OnEventAsync(ActorAction(a));
+        Assert.Equal(preload[0]!.ToJsonString(OverlayJson.Options), Assert.Single(_shows));
+    }
+
+    [Fact]
+    public async Task PassiveCastJson_NoPreload_NoBuilds()
+    {
+        var host = NewHost();
+        var calls = 0;
+        host.LoadPerson = (p, _, _, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            return Loaded(p);
+        };
+        var set = new CardSet("Cast", new[] { new Card("Ada", null, PersonId: Guid.NewGuid()) });
+
+        var json = await host.CastJsonAsync("d1", set, interactive: false, overlaySeconds: 10, itemId: Guid.NewGuid(), userId: "u1");
+
+        var layout = JsonNode.Parse(json)!.AsObject();
+        Assert.Null(layout["preload"]);
+        Assert.Equal(10000, layout["ttlMs"]!.GetValue<int>());
+        Assert.Equal(0, calls);
+    }
+
+    private static IEnumerable<JsonObject> Walk(JsonNode? node)
+    {
+        if (node is not JsonObject o)
+        {
+            yield break;
+        }
+
+        yield return o;
+        if (o["children"] is JsonArray kids)
+        {
+            foreach (var d in kids.SelectMany(Walk))
+            {
+                yield return d;
+            }
+        }
     }
 }

@@ -157,4 +157,26 @@ public class ActorDetailBuilderTests
         Assert.DoesNotContain(Walk(layout["root"]), n => n["showFor"] is not null);
         LayoutValidator.Validate(layout.ToJsonString(), "JellyXR");
     }
+    [Fact]
+    public void Build_LongBio_CutAtWordWithEllipsis()
+    {
+        var words = string.Concat(Enumerable.Repeat("שלום world ", 400)); // 4400 chars
+        var layout = ActorDetailBuilder.Build(Person(bio: words), Array.Empty<LibraryTitle>());
+
+        var bio = OfType(layout, "text").Single(t => t["scroll"]?.GetValue<bool>() == true);
+        var text = Str(bio["text"])!;
+        Assert.True(text.Length <= ActorDetailBuilder.MaxBioChars + 1);
+        Assert.EndsWith("…", text);
+        var body = text.TrimEnd('…');
+        Assert.True(body.EndsWith("שלום", StringComparison.Ordinal) || body.EndsWith("world", StringComparison.Ordinal), body[^12..]);
+        Assert.Equal(1500, ActorDetailBuilder.MaxBioChars);
+
+        // a single huge word: cut at the limit, never inside a surrogate pair
+        var emoji = string.Concat(Enumerable.Repeat("😀", 1000));
+        var cut = Str(OfType(ActorDetailBuilder.Build(Person(bio: emoji), Array.Empty<LibraryTitle>()), "text").Single(t => t["scroll"] is not null)["text"])!;
+        Assert.False(char.IsHighSurrogate(cut.TrimEnd('…')[^1]));
+
+        // short bios are unchanged
+        Assert.Contains(OfType(ActorDetailBuilder.Build(Person(bio: "Short."), Array.Empty<LibraryTitle>()), "text"), t => Str(t["text"]) == "Short.");
+    }
 }

@@ -13,6 +13,8 @@ public sealed record ApiResult(int Status, string? Json);
 /// </summary>
 public sealed class OverlayApi(OverlayRuntime rt)
 {
+    private static readonly JsonSerializerOptions RelaxedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     public static readonly TimeSpan PollHold = TimeSpan.FromSeconds(25);
 
     /// <summary>App action handlers get this long before the Event request answers anyway.</summary>
@@ -45,7 +47,8 @@ public sealed class OverlayApi(OverlayRuntime rt)
             seq = op.Seq;
         }
 
-        return new ApiResult(200, new JsonObject { ["seq"] = seq, ["ops"] = arr }.ToJsonString());
+        // non-ASCII text (Hebrew) as UTF-8 rather than \uXXXX escapes: about a third of the size. JSON body, never HTML.
+        return new ApiResult(200, new JsonObject { ["seq"] = seq, ["ops"] = arr }.ToJsonString(RelaxedJson));
     }
 
     public ApiResult Heartbeat(string deviceId, Func<string, bool> canUse)

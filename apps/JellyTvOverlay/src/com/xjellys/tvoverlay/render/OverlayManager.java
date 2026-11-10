@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.Set;
 
 import com.xjellys.tvoverlay.model.Layout;
-import com.xjellys.tvoverlay.model.Node;
+import com.xjellys.tvoverlay.logic.PreloadImages;
 
 /**
  * The shown overlay windows by layout id. Several interactive windows may coexist (a child over its parent);
@@ -20,6 +20,9 @@ import com.xjellys.tvoverlay.model.Node;
  * place (same window and stacking, same place in the focus order). Main thread only.
  */
 public final class OverlayManager {
+    /** Images fetched ahead per preloaded layout (the first ones in document order). */
+    static final int PRELOAD_IMAGES = 8;
+
     private final Context ctx;
     private final ImageCache images;
     private final OverlayWindow.Listener out;
@@ -57,10 +60,17 @@ public final class OverlayManager {
             refocus();
             throw e;
         }
-        for (Layout p : l.preload) preloadImages(p.root);
+        // a replaced window's queued preloads are stale; then the first few images of each preloaded layout
+        if (images != null) {
+            images.dropPreloads(l.id);
+            for (Layout p : l.preload) {
+                for (String src : PreloadImages.select(p.root, PRELOAD_IMAGES)) images.preload(src, l.id);
+            }
+        }
     }
 
     public void close(String id) {
+        if (images != null) images.dropPreloads(id);
         OverlayWindow w = windows.remove(id);
         stack.remove(id);
         if (w != null) w.close();
@@ -101,6 +111,7 @@ public final class OverlayManager {
                 // the window closed itself (back, ttl, finished): hand the remote to the next one, then report
                 windows.remove(id);
                 stack.remove(id);
+                if (images != null) images.dropPreloads(id);
                 refocus();
                 out.onClosed(l, reason);
             }
@@ -109,11 +120,5 @@ public final class OverlayManager {
                 out.onPassthrough(key);
             }
         };
-    }
-
-    private void preloadImages(Node n) {
-        if (n == null) return;
-        if ("image".equals(n.type) && images != null) images.preload(n.src());
-        for (Node c : n.children) preloadImages(c);
     }
 }

@@ -51,11 +51,14 @@ public sealed class OverlayClientHost : IHostedService
         FindSession = id => _sessions.Sessions.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal)) is { } s
             ? (s.Client, s.DeviceName)
             : null;
-        BuildDetail = BuildDetailAsync;
+        LoadPerson = LoadPersonAsync;
     }
 
-    /// <summary>Most actor details preloaded with one panel (the app caches 32 preloads).</summary>
-    internal const int MaxPreloads = 32;
+    /// <summary>Most actor details preloaded with one panel (bounds the payload and the TV's image preloads).</summary>
+    internal const int MaxPreloads = 16;
+
+    /// <summary>Most titles in a detail built with the panel (any of them may be preloaded).</summary>
+    internal const int PreloadTitles = 20;
 
     /// <summary>Actor detail builds running at once for one panel.</summary>
     internal const int PreloadConcurrency = 8;
@@ -69,8 +72,8 @@ public sealed class OverlayClientHost : IHostedService
 
     internal Func<string?, (string? Client, string? DeviceName)?> FindSession { get; set; }
 
-    /// <summary>Actor detail layout JSON for (person, user id, playing item), or null.</summary>
-    internal Func<Guid, string?, Guid, CancellationToken, Task<string?>> BuildDetail { get; set; }
+    /// <summary>The person and their titles for (person, user id, playing item), or null.</summary>
+    internal Func<Guid, string?, Guid, CancellationToken, Task<(PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)?>> LoadPerson { get; set; }
 
     /// <summary>How long the interactive panel waits for actor detail preloads; later ones are shown on demand.</summary>
     internal TimeSpan PreloadWait { get; set; } = TimeSpan.FromMilliseconds(1500);
@@ -261,23 +264,7 @@ public sealed class OverlayClientHost : IHostedService
             set = set with { Cards = set.Cards.Select(c => c with { Character = null }).ToList() };
         }
 
-        var layout = CastLayoutBuilder.Build(set, interactive);
-        if (!interactive && cfg.OverlaySeconds > 0)
-        {
-            layout["ttlMs"] = cfg.OverlaySeconds * 1000;
-        }
-
-        if (interactive)
-        {
-            var people = set.Cards.Select(c => c.PersonId).OfType<Guid>().Distinct().ToList();
-            var preload = await PreloadAsync(deviceId, people, UserOf(deviceId), item.Id).ConfigureAwait(false);
-            if (preload.Count > 0)
-            {
-                layout["preload"] = preload;
-            }
-        }
-
-        var json = layout.ToJsonString();
+        var json = await CastJsonAsync(deviceId, set, interactive, cfg.OverlaySeconds, item.Id, UserOf(deviceId)).ConfigureAwait(false);
         var shown = _gate.TryShow(deviceId, generation, interactive, () => ShowLayout(deviceId, json));
         if (shown)
         {
@@ -293,6 +280,28 @@ public sealed class OverlayClientHost : IHostedService
             // a newer build or an interactive panel won, or the host rejected a stale show (playback resumed meanwhile)
             _logger.LogDebug("Cast panel for {Item} on {Device} not shown (superseded or rejected by the host)", item.Name, deviceId);
         }
+    }
+
+    /// <summary>The cast panel layout JSON; interactive panels carry the actor details ready in time in <c>preload</c>.</summary>
+    internal async Task<string> CastJsonAsync(string deviceId, CardSet set, bool interactive, int overlaySeconds, Guid itemId, string? userId)
+    {
+        var layout = CastLayoutBuilder.Build(set, interactive);
+        if (!interactive && overlaySeconds > 0)
+        {
+            layout["ttlMs"] = overlaySeconds * 1000;
+        }
+
+        if (interactive)
+        {
+            var people = set.Cards.Select(c => c.PersonId).OfType<Guid>().Distinct().ToList();
+            var preload = await PreloadAsync(deviceId, people, userId, itemId).ConfigureAwait(false);
+            if (preload.Count > 0)
+            {
+                layout["preload"] = preload;
+            }
+        }
+
+        return layout.ToJsonString(OverlayJson.Options);
     }
 
     /// <summary>
@@ -332,7 +341,15 @@ public sealed class OverlayClientHost : IHostedService
             await limit.WaitAsync().ConfigureAwait(false);
             try
             {
-                return await BuildDetail(person, userId, itemId, CancellationToken.None).ConfigureAwait(false);
+                var loaded = await LoadPerson(person, userId, itemId, CancellationToken.None).ConfigureAwait(false);
+                if (loaded is not { } l)
+                {
+                    _logger.LogDebug("No actor detail for {Person}: no person item or no user", person);
+                    return null;
+                }
+
+                var titles = l.Titles.Count > PreloadTitles ? l.Titles.Take(PreloadTitles).ToList() : l.Titles;
+                return ActorDetailBuilder.Build(l.Person, titles).ToJsonString(OverlayJson.Options);
             }
             catch (Exception ex)
             {
@@ -384,7 +401,7 @@ public sealed class OverlayClientHost : IHostedService
         }
     }
 
-    private async Task<string?> BuildDetailAsync(Guid personId, string? userId, Guid itemId, CancellationToken ct)
+    private async Task<(PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)?> LoadPersonAsync(Guid personId, string? userId, Guid itemId, CancellationToken ct)
     {
         if (!Guid.TryParse(userId, out var uid) || _users.UserById(uid) is not { } user)
         {
@@ -392,8 +409,7 @@ public sealed class OverlayClientHost : IHostedService
             return null;
         }
 
-        var loaded = await PersonLibrary.LoadAsync(_library, personId, user, itemId, ct).ConfigureAwait(false);
-        return loaded is { } l ? ActorDetailBuilder.Build(l.Person, l.Titles).ToJsonString() : null;
+        return await PersonLibrary.LoadAsync(_library, personId, user, itemId, ct, PreloadTitles).ConfigureAwait(false);
     }
 
     /// <summary>The actor detail builds of the panel shown on a device: person id to its layout JSON (null = none).</summary>

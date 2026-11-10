@@ -18,6 +18,9 @@ public static class PersonLibrary
     /// <summary>Most titles one detail lists (keeps the layout and its poster preloads bounded).</summary>
     public const int MaxTitles = 40;
 
+    /// <summary>Most items read for one person (movies, series, episodes) before the rollup.</summary>
+    public const int QueryLimit = 500;
+
     /// <summary>
     /// Movies, series and the series of episodes, one entry per id, without the current movie or the current
     /// episode's series, newest first (undated last).
@@ -54,10 +57,10 @@ public static class PersonLibrary
     /// type moved between Jellyfin versions (see <see cref="LibraryCompat"/>). Null when the person is unknown.
     /// </summary>
     public static Task<(PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)?> LoadAsync(
-        ILibraryManager lib, Guid personId, object user, Guid currentItemId, CancellationToken ct)
-        => Task.Run(() => Load(lib, personId, user, currentItemId, ct), ct);
+        ILibraryManager lib, Guid personId, object user, Guid currentItemId, CancellationToken ct, int maxTitles = MaxTitles)
+        => Task.Run(() => Load(lib, personId, user, currentItemId, ct, maxTitles), ct);
 
-    private static (PersonInfo, IReadOnlyList<LibraryTitle>)? Load(ILibraryManager lib, Guid personId, object user, Guid currentItemId, CancellationToken ct)
+    private static (PersonInfo, IReadOnlyList<LibraryTitle>)? Load(ILibraryManager lib, Guid personId, object user, Guid currentItemId, CancellationToken ct, int maxTitles)
     {
         if (lib.GetItemById(personId) is not Person person)
         {
@@ -77,6 +80,7 @@ public static class PersonLibrary
             IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode },
             Recursive = true,
             IsVirtualItem = false,
+            Limit = QueryLimit,
         }.ForUser(user);
         var items = lib.ItemsOf(query).ToList();
         ct.ThrowIfCancellationRequested();
@@ -106,7 +110,7 @@ public static class PersonLibrary
         var currentSeries = lib.GetItemById(currentItemId) is Episode cur && cur.SeriesId != Guid.Empty ? cur.SeriesId : (Guid?)null;
 
         var titles = Rollup(movies, episodeSeries, series, currentItemId, currentSeries);
-        return (info, titles.Count > MaxTitles ? titles.Take(MaxTitles).ToList() : titles);
+        return (info, titles.Count > maxTitles ? titles.Take(maxTitles).ToList() : titles);
     }
 
     private static LibraryTitle Title(BaseItem item, int? seasons)

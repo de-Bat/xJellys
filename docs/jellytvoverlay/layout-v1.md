@@ -25,7 +25,7 @@ Rules that apply everywhere:
 | `closeOn` | array | `["stop","itemStart"]` | Triggers that close the layout. Subset of `itemStart`, `pause`, `resume`, `doublePause`, `seek`, `stop`. |
 | `suppressTriggers` | array | `[]` | Same trigger names as `closeOn`. While this layout is shown, the host delivers these triggers only to the layout's owner. |
 | `keys` | object | none | Map of key to binding. See Keys. |
-| `preload` | array | none | Layouts to cache on the device without showing them. Each is validated with the same owner. Used so a later `Show` is instant. |
+| `preload` | array | none | Layouts to cache on the device without showing them. Each is validated with the same owner. Used so a later `Show` is instant: a `Show` whose JSON equals a preloaded entry (key order aside) uses the cached copy. The app also fetches the first 8 images (document order) of each entry ahead of time, after the images of shown windows; the fetches still queued are dropped when the window that carried the preload closes. |
 | `root` | node | required | The root node. |
 
 ### Keys
@@ -44,8 +44,8 @@ The app maps remote keys as follows: D-pad to `left` `right` `up` `down`, centre
 In an interactive layout, a key is resolved in this order:
 
 1. A binding in `keys` wins.
-2. Arrows move focus to the nearest focusable node in that direction.
-3. If focus cannot move, up/down on a focused `scroll` text scrolls it.
+2. Up/down on a focused `scroll` text scroll it while it can still scroll that way. At its top or end, focus moves on as in 3.
+3. Arrows move focus to the nearest focusable node in that direction.
 4. Left/right with no possible move:
    - In `interactive+passthrough`, they go to the player (seek). Pages never take them.
    - Only in plain `interactive` layouts do they flip the visible `pages` container.
@@ -150,6 +150,10 @@ Each is a JSON string passed to the client's handler.
 ```
 
 `trigger` is one of `itemStart`, `pause`, `resume`, `doublePause`, `seek`, `stop`. A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or `null`. Other handler results are ignored; clients act through `Show` and `Close`.
+
+## Size
+
+`Show` returns `false` (and logs why) for a layout JSON over 1 MB (UTF-8, preloads included). Poll answers carry non-ASCII text as UTF-8, not `\uXXXX` escapes.
 
 ## Stale shows
 

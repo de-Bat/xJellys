@@ -13,6 +13,9 @@ public static class ActorDetailBuilder
     public const string TitleActionPrefix = "title:";
     public const int OverviewChars = 160;
 
+    /// <summary>Longest bio kept (cut at a word, with an ellipsis): bounds the preloaded payload.</summary>
+    public const int MaxBioChars = 1500;
+
     // Two stacked sections inside the card. The library section comes first in document order so the first
     // poster takes the initial focus (its description shows at once); it is drawn lower down by its y.
     private const double TopH = 0.43, LibY = 0.46, LibH = 0.54;
@@ -54,7 +57,7 @@ public static class ActorDetailBuilder
 
         if (!string.IsNullOrWhiteSpace(p.Bio))
         {
-            var bio = Text(p.Bio, 0.024, "#E6FFFFFF", maxLines: 8);
+            var bio = Text(Bio(p.Bio), 0.024, "#E6FFFFFF", maxLines: 8);
             bio["id"] = "bio";
             bio["scroll"] = true;
             bio["focusable"] = true;
@@ -216,6 +219,29 @@ public static class ActorDetailBuilder
 
         var cut = char.IsHighSurrogate(o[OverviewChars - 1]) ? OverviewChars - 1 : OverviewChars;
         return o[..cut].TrimEnd() + "…";
+    }
+
+    /// <summary>The bio up to <see cref="MaxBioChars"/>, cut at the last space before that (or at the limit, surrogate-safe).</summary>
+    private static string Bio(string bio)
+    {
+        var b = bio.Trim();
+        if (b.Length <= MaxBioChars)
+        {
+            return b;
+        }
+
+        var cut = MaxBioChars;
+        var space = b.LastIndexOf(' ', MaxBioChars);
+        if (space > MaxBioChars / 2)
+        {
+            cut = space;
+        }
+        else if (char.IsHighSurrogate(b[cut - 1]))
+        {
+            cut--;
+        }
+
+        return b[..cut].TrimEnd() + "…";
     }
 
     private static JsonObject Text(string text, double size, string color, bool bold = false, int maxLines = 0) => new()
