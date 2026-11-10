@@ -1,5 +1,7 @@
 JellyXR TV: companion app for Jellyfin on Android TV. Pause a movie or episode in Jellyfin and a panel with the cast (portraits, characters, who is on screen) appears over the player; it goes away when you resume.
 
+**New in 1.2.2:** no more Jellyfin crash after a subtitle sync. Jellyfin for Android TV crashes when another app restarts its playback, so after OK the app now stops the player and you press play to resume (Jellyfin keeps the spot); it then switches to the "Synced" track by itself.
+
 **New in 1.2.1:** subtitle sync restart fixed. After OK the app now stops the player, starts the title fresh at the same spot and then switches it to the "Synced" track once it plays (retried a few times). Before, the Jellyfin app restarted on the original track and its subtitle menu could miss the tracks.
 
 **New in 1.2.0:** subtitle sync. With the **JellySubSync plugin 1.0.0.0** on the server, pause, play and pause again within 4 seconds: a sync box opens over the player. Left / right moves the subtitles 0.25 s, up / down 1 s, OK applies and resumes on the synced track, BACK closes. While the box is up the remote drives the box, not the player.
