@@ -70,8 +70,8 @@ public class WatchService extends Service {
     private long castQuietUntil;
 
     // JellySubSync box: pause, play and pause again within DOUBLE_PAUSE_MS opens it
-    private static final long DOUBLE_PAUSE_MS = 4000, FAST_POLL_MS = 400, FAST_WINDOW_MS = 10000, SUB_GIVE_UP_MS = 35000;
-    /** After the restart: wait this long once the player plays, then ask it to switch; retry a few times. */
+    private static final long DOUBLE_PAUSE_MS = 4000, FAST_POLL_MS = 400, FAST_WINDOW_MS = 10000, SUB_GIVE_UP_MS = 600000;
+    /** After the viewer resumes: wait this long once the player plays, then ask it to switch; retry a few times. */
     private static final long SUB_SETTLE_MS = 2500, SUB_RETRY_MS = 4000, STOP_WAIT_MS = 6000;
     private static final int SUB_TRIES = 3;
     private SyncBox syncBox;
@@ -84,8 +84,7 @@ public class WatchService extends Service {
     private boolean syncApplying;
     /** What was playing when the box opened. */
     private String syncSession, syncItemId, syncSource;
-    private long syncTicks;
-    private int syncAudio, syncSub;
+    private int syncSub;
     private boolean syncCanSetSub;
     /** After a restart: the synced stream the player should be on, -1 = nothing to check. */
     private int pendingSub = -1;
@@ -335,19 +334,23 @@ public class WatchService extends Service {
 
         if (pendingSub >= 0) {
             if (now - pendingSince > SUB_GIVE_UP_MS) {
+                // the viewer did not resume this title: drop it quietly
                 pendingSub = -1;
-                toast("Subtitles synced. If they did not change, pick the \"Synced\" track in the player's subtitle menu.");
-            } else if (s != null && id != null && id.equals(syncItemId) && !paused && ps != null) {
+            } else if (s != null && id != null && !paused && ps != null && !id.equals(syncItemId)) {
+                // something else plays now
+                pendingSub = -1;
+            } else if (s != null && id != null && !paused && ps != null) {
                 int cur = ps.has("SubtitleStreamIndex") ? ps.optInt("SubtitleStreamIndex", -1) : -1;
+                if (pendingPlaying == 0) pendingPlaying = now;
                 if (cur == pendingSub) {
                     pendingSub = -1;
+                } else if (!syncCanSetSub || pendingTries >= SUB_TRIES && now - pendingLastSent >= SUB_RETRY_MS) {
+                    pendingSub = -1;
+                    toast("Pick the \"Synced\" track in the player's subtitle menu.");
                 } else {
-                    // Jellyfin for Android TV ignores the subtitle index of a remote PlayNow and starts on the
-                    // track of the last used language (the original). Once its player really plays, ask it to
-                    // switch; a command sent while it is still loading is dropped, so retry.
-                    if (pendingPlaying == 0) pendingPlaying = now;
-                    if (syncCanSetSub && pendingTries < SUB_TRIES && now - pendingPlaying >= SUB_SETTLE_MS
-                        && now - pendingLastSent >= SUB_RETRY_MS) {
+                    // The resumed player starts on the track of the last used language (the original). Once it
+                    // really plays, ask it to switch; a command sent while it still loads is dropped, so retry.
+                    if (now - pendingPlaying >= SUB_SETTLE_MS && now - pendingLastSent >= SUB_RETRY_MS) {
                         pendingTries++;
                         pendingLastSent = now;
                         try {
@@ -358,7 +361,7 @@ public class WatchService extends Service {
                     }
                 }
             } else {
-                // stopped, loading or paused: wait for the restarted player to play
+                // stopped, loading or paused: wait for the viewer to resume
                 pendingPlaying = 0;
             }
         }
@@ -369,8 +372,6 @@ public class WatchService extends Service {
         syncSession = s.optString("Id");
         syncItemId = item.optString("Id");
         syncSource = ps.optString("MediaSourceId", "");
-        syncTicks = ps.optLong("PositionTicks");
-        syncAudio = ps.has("AudioStreamIndex") ? ps.optInt("AudioStreamIndex", -1) : -1;
         syncSub = ps.has("SubtitleStreamIndex") ? ps.optInt("SubtitleStreamIndex", -1) : -1;
         syncCanSetSub = supports(s, "SetSubtitleStreamIndex");
 
@@ -422,7 +423,12 @@ public class WatchService extends Service {
         });
     }
 
-    /** Worker thread: shift on the server, then restart playback at the paused position on the synced track. */
+    /**
+     * Worker thread: shift on the server, then stop the player. The viewer resumes from the item page (Jellyfin
+     * saved the position), the player then lists the new track, and subSync switches it to the synced one.
+     * No remote PlayNow: Jellyfin for Android TV (0.20.0-beta.4) loads the items of a PlayNow without their media sources
+     * and crashes (NullPointerException in buildExoPlayerOptions) once it remembers an audio language.
+     */
     private void applySync(final long offsetMs) {
         if (!syncOpen || syncApplying) return;
         syncApplying = true;
@@ -430,9 +436,8 @@ public class WatchService extends Service {
         try {
             Api api = Api.of(prefs);
             int idx = api.subSyncApply(syncItemId, syncSource, syncSub, offsetMs);
-            boxBusy("Restarting playback...");
+            boxBusy("Stopping playback...");
             stopAndWait(api);
-            api.playAt(syncSession, syncItemId, syncSource, syncTicks, syncAudio, idx);
             long now = System.currentTimeMillis();
             pendingSub = idx;
             pendingSince = now;
@@ -442,10 +447,11 @@ public class WatchService extends Service {
             castQuietUntil = now + 8000;
             resumedAt = 0;
             syncOpen = false;
-            final String msg = "Subtitles " + SyncBox.format(offsetMs) + (offsetMs == 0 ? " (original)" : "");
+            final String msg = "Subtitles " + SyncBox.format(offsetMs) + (offsetMs == 0 ? " (original)" : "") + ". Press play to resume.";
             main.post(new Runnable() {
                 @Override public void run() { syncBox.done(msg); }
             });
+            toast("Subtitles " + SyncBox.format(offsetMs) + ". Press play to resume.");
         } catch (final Exception e) {
             Log.w(TAG, "subtitle sync failed", e);
             final String msg = e instanceof Api.HttpError ? e.getMessage() : "Could not reach the server: " + e.getMessage();
@@ -458,9 +464,8 @@ public class WatchService extends Service {
     }
 
     /**
-     * Worker thread: stop the player and wait (up to STOP_WAIT_MS) until the session reports nothing playing.
-     * A PlayNow into an open Jellyfin for Android TV player swaps the player in place (items loaded without
-     * their media sources, old player not ended), which left the subtitle menu without the tracks. Start fresh.
+     * Worker thread: stop the player and wait (up to STOP_WAIT_MS) until the session reports nothing playing,
+     * so the pending switch below does not see the old player.
      */
     private void stopAndWait(Api api) {
         try {
@@ -481,7 +486,6 @@ public class WatchService extends Service {
                 }
                 JSONObject item = s == null ? null : s.optJSONObject("NowPlayingItem");
                 if (item == null || !syncItemId.equals(item.optString("Id"))) {
-                    Thread.sleep(700); // let the player close before it gets the new play command
                     return;
                 }
             } catch (InterruptedException e) {
@@ -491,7 +495,7 @@ public class WatchService extends Service {
                 Log.w(TAG, "session check after stop failed", e);
             }
         }
-        Log.w(TAG, "player still reports the item " + STOP_WAIT_MS + " ms after stop; restarting anyway");
+        Log.w(TAG, "player still reports the item " + STOP_WAIT_MS + " ms after stop");
     }
 
     private void boxBusy(final String msg) {

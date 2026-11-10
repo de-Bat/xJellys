@@ -277,16 +277,6 @@ final class Api {
         return new JSONObject(t).getInt("StreamIndex");
     }
 
-    /** Remote control: (re)start item on the session at ticks with these audio / subtitle tracks (negative = leave out). */
-    void playAt(String sessionId, String itemId, String mediaSourceId, long ticks, int audioIndex, int subtitleIndex) throws Exception {
-        StringBuilder q = new StringBuilder("/Sessions/").append(enc(sessionId)).append("/Playing?playCommand=PlayNow")
-            .append("&itemIds=").append(enc(itemId)).append("&startPositionTicks=").append(ticks);
-        if (mediaSourceId != null && !mediaSourceId.isEmpty()) q.append("&mediaSourceId=").append(enc(mediaSourceId));
-        if (audioIndex >= 0) q.append("&audioStreamIndex=").append(audioIndex);
-        if (subtitleIndex >= 0) q.append("&subtitleStreamIndex=").append(subtitleIndex);
-        call("POST", q.toString(), null);
-    }
-
     /** Remote control: stop playback on the session. */
     void stop(String sessionId) throws Exception {
         call("POST", "/Sessions/" + enc(sessionId) + "/Playing/Stop", null);
