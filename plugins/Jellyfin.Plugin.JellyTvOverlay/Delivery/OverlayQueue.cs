@@ -4,6 +4,7 @@ using Jellyfin.Plugin.JellyTvOverlay.Layout;
 
 namespace Jellyfin.Plugin.JellyTvOverlay.Delivery;
 
+/// <summary>One delivery op. Op is show, close or reset. A reset (LayoutId empty) starts every snapshot: the app closes everything not shown again by the show ops that follow (all with Seq = head).</summary>
 public sealed record OverlayOp(long Seq, string Op, string LayoutId, JsonObject? Layout);
 
 /// <summary>Per-device ordered op log with snapshot, long-poll and ttl expiry. Thread-safe.</summary>
@@ -45,7 +46,7 @@ public sealed class OverlayQueue(TimeProvider clock)
         var d = Get(deviceId);
         lock (d.Gate)
         {
-            return d.Order.Select(id => d.Shown[id].Layout).ToList();
+            return Live(d);
         }
     }
 
@@ -66,6 +67,7 @@ public sealed class OverlayQueue(TimeProvider clock)
         }
     }
 
+    /// <summary>Returns ops with Seq greater than since (op values show|close), waiting up to timeout. Snapshot responses (since 0, above head or older than the retained log) are [reset, show...] with all Seq = head; since 0 on a never-used queue waits instead.</summary>
     public async Task<IReadOnlyList<OverlayOp>> WaitAsync(string deviceId, long since, TimeSpan timeout, CancellationToken ct)
     {
         var d = Get(deviceId);
@@ -107,18 +109,25 @@ public sealed class OverlayQueue(TimeProvider clock)
     }
 
     // Returns null when there is nothing to deliver yet (caller waits). Caller holds d.Gate.
-    private static IReadOnlyList<OverlayOp>? Collect(DeviceQueue d, long since)
+    private IReadOnlyList<OverlayOp>? Collect(DeviceQueue d, long since)
     {
         var oldest = d.Log.Count > 0 ? d.Log[0].Seq : d.Head + 1;
         var stale = since == 0 || since > d.Head || since < oldest - 1;
         if (stale)
         {
-            if (d.Shown.Count == 0 && since == 0)
+            var live = Live(d);
+            if (since == 0 && d.Head == 0 && live.Count == 0)
             {
                 return null;
             }
 
-            return d.Order.Select(id => new OverlayOp(d.Head, "show", id, d.Shown[id].Layout.Json)).ToList();
+            var snap = new List<OverlayOp>(live.Count + 1) { new OverlayOp(d.Head, "reset", string.Empty, null) };
+            foreach (var l in live)
+            {
+                snap.Add(new OverlayOp(d.Head, "show", l.Id, l.Json));
+            }
+
+            return snap;
         }
 
         if (since == d.Head)
@@ -127,6 +136,13 @@ public sealed class OverlayQueue(TimeProvider clock)
         }
 
         return d.Log.Where(o => o.Seq > since).ToList();
+    }
+
+    // Layouts not yet expired per the clock, in show order. Caller holds d.Gate.
+    private List<ValidatedLayout> Live(DeviceQueue d)
+    {
+        var now = clock.GetUtcNow();
+        return d.Order.Select(id => d.Shown[id]).Where(e => e.ExpiresAt is not { } at || at > now).Select(e => e.Layout).ToList();
     }
 
     // Caller holds d.Gate.
