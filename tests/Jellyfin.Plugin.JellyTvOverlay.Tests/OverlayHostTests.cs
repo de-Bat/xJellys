@@ -9,6 +9,7 @@ using Xunit;
 namespace Jellyfin.Plugin.JellyTvOverlay.Tests;
 
 /// <summary>OverlayHost is static: every test touching it lives in this class, so they run one at a time.</summary>
+[Collection("OverlayHost")]
 public sealed class OverlayHostTests : IDisposable
 {
     private const string Dev = "dev1";

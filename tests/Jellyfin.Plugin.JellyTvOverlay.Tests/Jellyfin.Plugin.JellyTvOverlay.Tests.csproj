@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\plugins\shared\OverlayClient.cs" Link="OverlayClient.cs" />
     <ProjectReference Include="..\..\plugins\Jellyfin.Plugin.JellyTvOverlay\Jellyfin.Plugin.JellyTvOverlay.csproj" />
   </ItemGroup>
 
