@@ -93,6 +93,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>JellyXR TV companion app: on pause show the portraits panel over the Android TV player (and send that device no text messages).</summary>
     public bool TvOverlay { get; set; } = true;
 
+    /// <summary>
+    /// JellyTvOverlay app: false = the cast panel appears by itself on pause (passive, the remote keeps driving the player);
+    /// true = it is offered on pause and opened as an interactive panel (rows selectable). A double pause always offers it.
+    /// </summary>
+    public bool TvPanelInteractive { get; set; } = false;
+
     /// <summary>Seconds the pause panel (web and TV companion) stays up. 0 = until playback resumes.</summary>
     public int OverlaySeconds { get; set; } = 0;
 

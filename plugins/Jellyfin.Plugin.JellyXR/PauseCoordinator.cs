@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Jellyfin.Plugin.JellyXR.Configuration;
+using Jellyfin.Plugin.JellyXR.Overlay;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -18,11 +19,13 @@ public sealed class PauseCoordinator : IHostedService
     private readonly FaceScanner _scanner;
     private readonly XrayarrClient _xrayarr;
     private readonly MarkerService _markers;
+    private readonly OverlayClientHost _overlay;
     private readonly ILogger<PauseCoordinator> _logger;
     private readonly ConcurrentDictionary<string, bool> _paused = new();
 
-    public PauseCoordinator(ISessionManager sessions, CardService cards, FaceScanner scanner, XrayarrClient xrayarr, MarkerService markers, ILogger<PauseCoordinator> logger)
+    public PauseCoordinator(ISessionManager sessions, CardService cards, FaceScanner scanner, XrayarrClient xrayarr, MarkerService markers, OverlayClientHost overlay, ILogger<PauseCoordinator> logger)
     {
+        _overlay = overlay;
         _xrayarr = xrayarr;
         _sessions = sessions;
         _markers = markers;
@@ -145,7 +148,14 @@ public sealed class PauseCoordinator : IHostedService
             return;
         }
 
-        if (!ClientMatches(cfg.ClientFilter, session, e))
+        // HasApp also binds lazily: the JellyTvOverlay host may load after JellyXR.
+        if (cfg.TvOverlay && _overlay.HasApp(session.DeviceId))
+        {
+            _logger.LogDebug("No text cards for {Item} on {Device}: the JellyTvOverlay app shows the cast panel there", e.Item.Name, session.DeviceName);
+            return;
+        }
+
+        if (!ClientMatches(cfg.ClientFilter, session.Client, session.DeviceName, e.ClientName, e.DeviceName))
         {
             _logger.LogDebug("No cards for {Item}: client {Client} on {Device} does not match filter '{Filter}'", e.Item.Name, session.Client, session.DeviceName, cfg.ClientFilter);
             return;
@@ -250,14 +260,15 @@ public sealed class PauseCoordinator : IHostedService
     private static bool IsWebClient(SessionInfo session) =>
         session.Client?.Contains("Jellyfin Web", StringComparison.OrdinalIgnoreCase) ?? false;
 
-    private static bool ClientMatches(string filter, SessionInfo session, PlaybackProgressEventArgs e)
+    /// <summary>The ClientFilter setting: any entry is a case-insensitive substring of one of the client and device names.</summary>
+    internal static bool ClientMatches(string filter, params string?[] names)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {
             return true;
         }
 
-        var haystack = $"{session.Client} {session.DeviceName} {e.ClientName} {e.DeviceName}";
+        var haystack = string.Join(' ', names);
         return filter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Any(f => haystack.Contains(f, StringComparison.OrdinalIgnoreCase));
     }

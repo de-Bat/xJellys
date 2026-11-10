@@ -22,4 +22,8 @@
     <EmbeddedResource Include="Web\xray.js" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\shared\OverlayClient.cs" Link="OverlayClient.cs" />
+  </ItemGroup>
+
 </Project>

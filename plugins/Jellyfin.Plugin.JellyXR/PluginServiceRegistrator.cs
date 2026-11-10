@@ -17,6 +17,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<FaceScanner>();
         serviceCollection.AddSingleton<CastTimelineService>();
         serviceCollection.AddSingleton<CardService>();
+        serviceCollection.AddSingleton<Overlay.OverlayClientHost>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Overlay.OverlayClientHost>());
         serviceCollection.AddHostedService<PauseCoordinator>();
         serviceCollection.AddHostedService<WebInjector>();
     }
