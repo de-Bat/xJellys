@@ -46,6 +46,9 @@ public class MainActivity extends Activity {
     private Button overlayBtn, watchBtn, bootBtn, quickBtn;
     private volatile String quickSecret;
     private OverlayManager overlays;
+    private ImageCache overlayImages;
+    /** server + token the overlays' Api was built for; a sign-in change rebuilds them. */
+    private String overlaysFor;
 
     private final Runnable refresher = new Runnable() {
         @Override public void run() {
@@ -163,7 +166,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         quickSecret = null;
-        if (overlays != null) overlays.closeAll();
+        dropOverlays();
         super.onDestroy();
     }
 
@@ -331,6 +334,7 @@ public class MainActivity extends Activity {
             @Override public void run() { api.signOut(); }
         }).start();
         prefs.signOut();
+        dropOverlays();
         refresh();
         quickBtn.requestFocus();
     }
@@ -347,8 +351,12 @@ public class MainActivity extends Activity {
             InputStream in = getResources().openRawResource(R.raw.test_layout);
             String json = new String(Api.readCapped(in, 256 * 1024), java.nio.charset.StandardCharsets.UTF_8);
             Layout l = Layout.parse(new JSONObject(json));
+            String key = prefs.server() + "|" + prefs.token();
+            if (overlays != null && !key.equals(overlaysFor)) dropOverlays();
             if (overlays == null) {
-                overlays = new OverlayManager(this, new ImageCache(Api.of(prefs), 24 * 1024 * 1024),
+                overlaysFor = key;
+                overlayImages = new ImageCache(Api.of(prefs), 24 * 1024 * 1024);
+                overlays = new OverlayManager(this, overlayImages,
                     new OverlayWindow.Listener() {
                         @Override public void onAction(Layout lay, String action, String elementId, JSONObject values) {
                             Toast.makeText(MainActivity.this, "Action " + action + " on " + elementId, Toast.LENGTH_SHORT).show();
@@ -367,6 +375,14 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             say("Test panel failed: " + e.getMessage());
         }
+    }
+
+    private void dropOverlays() {
+        if (overlays != null) overlays.closeAll();
+        if (overlayImages != null) overlayImages.shutdown();
+        overlays = null;
+        overlayImages = null;
+        overlaysFor = null;
     }
 
     private void pickSession() {

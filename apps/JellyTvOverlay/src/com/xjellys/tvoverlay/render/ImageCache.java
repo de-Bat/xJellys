@@ -56,6 +56,13 @@ public final class ImageCache {
         };
     }
 
+    /** Stops the worker threads (when this cache is replaced, e.g. after a sign-in change). */
+    public void shutdown() {
+        pool.shutdownNow();
+        waiting.clear();
+        cache.evictAll();
+    }
+
     /** Fetches and decodes src into the cache without a view (so a later show is instant). */
     public void preload(String src) {
         if (src == null || src.isEmpty() || cache.get(src) != null) return;

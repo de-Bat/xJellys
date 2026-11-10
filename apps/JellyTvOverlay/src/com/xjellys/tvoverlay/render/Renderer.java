@@ -74,7 +74,8 @@ public final class Renderer {
         final Map<String, ViewGroup> scrollerOf = new HashMap<String, ViewGroup>();
         final Map<String, TextView> values = new HashMap<String, TextView>();
         final Map<String, String> changedActions = new HashMap<String, String>();
-        final Map<String, TextView> scrollTexts = new HashMap<String, TextView>();
+        /** scroll:true text id to the ScrollView wrapping its TextView. */
+        final Map<String, ScrollView> scrollTexts = new HashMap<String, ScrollView>();
         final List<Timed> pages = new ArrayList<Timed>();
         final List<Timed> sequences = new ArrayList<Timed>();
     }
@@ -146,6 +147,10 @@ public final class Renderer {
             v = timed(n, "pages".equals(t), ibw, ibh, scroller);
         } else if ("text".equals(t)) {
             v = text(n);
+            if (v instanceof ScrollView && h < 0 && n.maxLines() > 0) {
+                // a scroll text shows maxLines lines; the rest scrolls inside the box
+                lh = n.maxLines() * ((TextView) ((ScrollView) v).getChildAt(0)).getLineHeight() + 2 * pad;
+            }
         } else if ("value".equals(t)) {
             v = value(n);
         } else if ("image".equals(t)) {
@@ -256,17 +261,24 @@ public final class Renderer {
         return tv;
     }
 
+    /** Plain text: maxLines with an ellipsis. scroll:true: the full text in a ScrollView (not focusable). */
     private View text(Node n) {
         TextView tv = label(n.text(), n, n.color());
         int ml = n.maxLines();
-        if (ml > 0) tv.setMaxLines(ml);
-        if (n.scroll()) {
-            tv.setVerticalScrollBarEnabled(false);
-            if (n.id != null) refs.scrollTexts.put(n.id, tv);
-        } else if (ml > 0) {
-            tv.setEllipsize(TextUtils.TruncateAt.END);
+        if (!n.scroll()) {
+            if (ml > 0) {
+                tv.setMaxLines(ml);
+                tv.setEllipsize(TextUtils.TruncateAt.END);
+            }
+            return tv;
         }
-        return tv;
+        ScrollView sv = new ScrollView(ctx);
+        sv.setFocusable(false);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        sv.addView(tv, new FrameLayout.LayoutParams(MATCH, WRAP));
+        if (n.id != null) refs.scrollTexts.put(n.id, sv);
+        return sv;
     }
 
     private View value(Node n) {

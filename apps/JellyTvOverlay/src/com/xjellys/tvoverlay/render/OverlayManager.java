@@ -35,7 +35,8 @@ public final class OverlayManager {
 
     public void show(Layout l) {
         OverlayWindow w = windows.get(l.id);
-        if (w == null) {
+        final boolean fresh = w == null;
+        if (fresh) {
             w = new OverlayWindow(ctx, images, relay(l.id));
             windows.put(l.id, w);
         }
@@ -49,7 +50,8 @@ public final class OverlayManager {
         try {
             w.show(l);
         } catch (RuntimeException e) {
-            // no overlay permission or the window was refused: forget it
+            // no overlay permission or the window was refused. A failed replace may still be attached: close it.
+            if (!fresh) w.close();
             windows.remove(l.id);
             stack.remove(l.id);
             refocus();

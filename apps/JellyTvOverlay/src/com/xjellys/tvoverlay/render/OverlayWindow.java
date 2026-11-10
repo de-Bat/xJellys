@@ -16,6 +16,7 @@ import android.view.ViewTreeObserver;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONObject;
@@ -203,26 +204,16 @@ public final class OverlayWindow {
 
     // ---- keys ----
 
-    static String keyName(int code) {
-        switch (code) {
-            case KeyEvent.KEYCODE_DPAD_LEFT: return "left";
-            case KeyEvent.KEYCODE_DPAD_RIGHT: return "right";
-            case KeyEvent.KEYCODE_DPAD_UP: return "up";
-            case KeyEvent.KEYCODE_DPAD_DOWN: return "down";
-            case KeyEvent.KEYCODE_DPAD_CENTER:
-            case KeyEvent.KEYCODE_ENTER:
-            case KeyEvent.KEYCODE_NUMPAD_ENTER: return "ok";
-            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-            case KeyEvent.KEYCODE_MEDIA_PLAY: return "play";
-            case KeyEvent.KEYCODE_BACK: return "back";
-            default: return null;
-        }
-    }
-
     private boolean onKey(KeyEvent e) {
         if (layout == null || !layout.interactive()) return false;
-        String k = keyName(e.getKeyCode());
-        if (k == null) return false;
+        String k = Keys.name(e.getKeyCode());
+        if (k == null) {
+            // other media keys: passthrough layouts hand them to the player, plain interactive ones consume them
+            String alias = Keys.mediaAlias(e.getKeyCode());
+            if (alias == null) return false;
+            if (e.getAction() == KeyEvent.ACTION_DOWN && layout.passthrough()) listener.onPassthrough(alias);
+            return true;
+        }
         if ("back".equals(k)) {
             // act on UP: closing on DOWN would hand the UP to the player underneath (it would leave playback)
             if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) backArmed = true;
@@ -253,7 +244,8 @@ public final class OverlayWindow {
                 finish("back");
                 break;
             case PASSTHROUGH:
-                if (!flipPages(k)) listener.onPassthrough(k);
+                // FocusModel's decision stands: the player gets it (pages never steal seek keys)
+                listener.onPassthrough(k);
                 break;
             default:
                 if (("up".equals(k) || "down".equals(k)) && scrollText(k)) break;
@@ -332,12 +324,13 @@ public final class OverlayWindow {
 
     /** Up/down on a focused scroll text: moves its content by three lines, clamped. */
     private boolean scrollText(String k) {
-        TextView tv = focusedId == null ? null : refs.scrollTexts.get(focusedId);
-        if (tv == null || tv.getLayout() == null) return false;
-        int visible = tv.getHeight() - tv.getTotalPaddingTop() - tv.getTotalPaddingBottom();
-        int max = Math.max(0, tv.getLayout().getHeight() - visible);
-        int ny = tv.getScrollY() + ("down".equals(k) ? 1 : -1) * 3 * tv.getLineHeight();
-        tv.scrollTo(tv.getScrollX(), Math.max(0, Math.min(max, ny)));
+        ScrollView sv = focusedId == null ? null : refs.scrollTexts.get(focusedId);
+        if (sv == null || sv.getChildCount() == 0) return false;
+        TextView tv = (TextView) sv.getChildAt(0);
+        int visible = sv.getHeight() - sv.getPaddingTop() - sv.getPaddingBottom();
+        int max = Math.max(0, tv.getHeight() - visible);
+        int ny = sv.getScrollY() + ("down".equals(k) ? 1 : -1) * 3 * tv.getLineHeight();
+        sv.scrollTo(0, Math.max(0, Math.min(max, ny)));
         return true;
     }
 

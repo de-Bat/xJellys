@@ -37,6 +37,62 @@ A binding is one of:
 - `{"op":"action","action":"<name>"}`: report the action to the owner plugin.
 - `{"op":"step","target":"<value node id>","by":<number>}`: add `by` to the `value` node with that id, locally. `target` must name a `value` node inside this layout's `root`, otherwise the layout is rejected.
 
+### Keys on the TV remote
+
+The app maps remote keys as follows: D-pad to `left` `right` `up` `down`, centre and Enter to `ok`, Play/Pause and Play to `play`, and Back to `back`. Back acts on key release.
+
+In an interactive layout, a key is resolved in this order:
+
+1. A binding in `keys` wins.
+2. Arrows move focus to the nearest focusable node in that direction.
+3. If focus cannot move, up/down on a focused `scroll` text scrolls it.
+4. Left/right with no possible move:
+   - In `interactive+passthrough`, they go to the player (seek). Pages never take them.
+   - Only in plain `interactive` layouts do they flip the visible `pages` container.
+
+In `interactive+passthrough` layouts these media keys also go to the player:
+
+| Key | Sent as |
+|---|---|
+| Pause | `play` (toggle) |
+| Fast forward, Next | `right` |
+| Rewind, Previous | `left` |
+| Stop | `stop` |
+
+In plain `interactive` layouts these media keys are consumed.
+
+## Units and defaults
+
+These are the app's rendering rules, for values the fields above leave open.
+
+| Value | Measured as |
+|---|---|
+| `x` `y` `w` `h` | Fractions of the parent's inner box (after the parent's `pad`). The root node's parent box is the screen. |
+| `size` `pad` `gap` `radius` | Fractions of the screen height. |
+| `x` `y` on a child of `row`, `column` or `list` | Ignored: those children flow. |
+
+Missing `w` or `h`:
+
+- Child of `stack`, `pages` or `sequence`: fills the box. A text fills the width and wraps its height.
+- Child of `row` or `column`: wraps on the main axis and fills the cross axis.
+- A `text` fills the width in a column or stack. Its height always wraps.
+- `button`, `icon` and `value` wrap both ways.
+- A `round` image with only one size given is a circle of that size.
+- A `text` with `scroll` and `maxLines` but no `h` is `maxLines` lines tall. Its full text scrolls inside.
+
+Defaults:
+
+| Node | Default |
+|---|---|
+| `icon` without `w`/`h` | A square of 1.3 x `size` (default `size` 0.03) of the screen height. |
+| `button` padding | 0.02 horizontal and 0.01 vertical (unless `pad` is set). |
+| `button` corner radius | 0.01 (unless `radius` is set). |
+| `button` background | `#33FFFFFF` (unless `bg` is set). |
+| `button` icon | 1.2 x the label text size. |
+| `image` placeholder | `#33FFFFFF` (unless `bg` is set) until the image loads. A rejected or failed `src` stays empty. |
+
+Focus is shown as a 2 dp `#4AA3FF` outline over a `#224AA3FF` fill, following the node's shape.
+
 ## Nodes
 
 Common fields on every node:
