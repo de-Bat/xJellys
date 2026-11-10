@@ -212,7 +212,10 @@ public final class OverlayWindow {
             // other media keys: passthrough layouts hand them to the player, plain interactive ones consume them
             String alias = Keys.mediaAlias(e.getKeyCode());
             if (alias == null) return false;
-            if (e.getAction() == KeyEvent.ACTION_DOWN && layout.passthrough()) listener.onPassthrough(alias);
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                restartTtl();
+                if (layout.passthrough()) listener.onPassthrough(alias);
+            }
             return true;
         }
         if ("back".equals(k)) {
@@ -228,7 +231,15 @@ public final class OverlayWindow {
         return true;
     }
 
+    /** ttlResetOnKey: every key this window handles starts its ttl again (an idle timeout). */
+    private void restartTtl() {
+        if (layout == null || !layout.ttlRestartsOnKey()) return;
+        main.removeCallbacks(ttl);
+        main.postDelayed(ttl, layout.ttlMs);
+    }
+
     private void handle(String k) {
+        restartTtl();
         if (fm == null) rebuildFocus();
         FocusModel.Result r = fm.onKey(k);
         switch (r.kind) {

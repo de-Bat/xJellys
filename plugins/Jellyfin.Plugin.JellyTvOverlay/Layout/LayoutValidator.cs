@@ -100,6 +100,11 @@ public static class LayoutValidator
             ttlMs = (int)ttl;
         }
 
+        if (obj["ttlResetOnKey"] is { } reset && !(reset is JsonValue rv && rv.TryGetValue<bool>(out _)))
+        {
+            throw new LayoutException("ttlResetOnKey must be a boolean");
+        }
+
         string? parent = null;
         if (obj["parent"] is not null)
         {

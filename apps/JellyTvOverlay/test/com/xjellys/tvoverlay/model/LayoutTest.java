@@ -169,6 +169,18 @@ public class LayoutTest {
     }
 
     @Test
+    public void ttlResetOnKey_parsed_andOnlyForInteractiveWithTtl() throws Exception {
+        assertFalse(p("{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"row\"}}").ttlResetOnKey);
+        Layout l = p("{\"v\":1,\"id\":\"a\",\"focus\":\"interactive\",\"ttlMs\":15000,\"ttlResetOnKey\":true,\"root\":{\"type\":\"row\"}}");
+        assertTrue(l.ttlResetOnKey);
+        assertTrue(l.ttlRestartsOnKey());
+        // a passive layout gets no keys; without a ttl there is nothing to restart; non-boolean = false
+        assertFalse(p("{\"v\":1,\"id\":\"a\",\"ttlMs\":15000,\"ttlResetOnKey\":true,\"root\":{\"type\":\"row\"}}").ttlRestartsOnKey());
+        assertFalse(p("{\"v\":1,\"id\":\"a\",\"focus\":\"interactive\",\"ttlResetOnKey\":true,\"root\":{\"type\":\"row\"}}").ttlRestartsOnKey());
+        assertFalse(p("{\"v\":1,\"id\":\"a\",\"focus\":\"interactive\",\"ttlMs\":15000,\"ttlResetOnKey\":\"yes\",\"root\":{\"type\":\"row\"}}").ttlResetOnKey);
+    }
+
+    @Test
     public void button_disabled_notFocusable() throws Exception {
         Layout l = p("{\"v\":1,\"id\":\"a\",\"root\":{\"type\":\"button\",\"label\":\"Play\",\"icon\":\"play\","
                 + "\"focusable\":true,\"enabled\":false,\"action\":\"go\"}}");

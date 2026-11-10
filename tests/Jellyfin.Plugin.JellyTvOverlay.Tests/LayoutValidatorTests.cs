@@ -31,6 +31,18 @@ public class LayoutValidatorTests
     }
 
     [Fact]
+    public void TtlResetOnKey_KeptWhenBool_RejectedOtherwise()
+    {
+        var l = LayoutValidator.Validate(
+            "{\"v\":1,\"id\":\"a\",\"ttlMs\":15000,\"ttlResetOnKey\":true,\"root\":{\"type\":\"text\"}}", "JellyXR");
+        Assert.True((bool)l.Json["ttlResetOnKey"]!);
+
+        var ex = Assert.Throws<LayoutException>(() => LayoutValidator.Validate(
+            "{\"v\":1,\"id\":\"a\",\"ttlResetOnKey\":\"yes\",\"root\":{\"type\":\"text\"}}", "JellyXR"));
+        Assert.Contains("ttlResetOnKey", ex.Message);
+    }
+
+    [Fact]
     public void BadFocus_Throws()
     {
         var ex = Assert.Throws<LayoutException>(() => LayoutValidator.Validate(

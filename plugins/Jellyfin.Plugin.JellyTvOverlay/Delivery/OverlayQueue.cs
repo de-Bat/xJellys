@@ -7,7 +7,7 @@ namespace Jellyfin.Plugin.JellyTvOverlay.Delivery;
 /// <summary>One delivery op. Op is show, close or reset. A reset (LayoutId empty) starts every snapshot: the app closes everything not shown again by the show ops that follow (all with Seq = head).</summary>
 public sealed record OverlayOp(long Seq, string Op, string LayoutId, JsonObject? Layout);
 
-/// <summary>Per-device ordered op log with snapshot, long-poll and ttl expiry. Thread-safe.</summary>
+/// <summary>Per-device ordered op log with snapshot, long-poll and ttl expiry (not for ttlResetOnKey layouts: the app owns their ttl). Thread-safe.</summary>
 public sealed class OverlayQueue(TimeProvider clock)
 {
     private const int MaxLog = 200;
@@ -19,7 +19,8 @@ public sealed class OverlayQueue(TimeProvider clock)
         var d = Get(deviceId);
         lock (d.Gate)
         {
-            var expires = l.TtlMs > 0 ? clock.GetUtcNow().AddMilliseconds(l.TtlMs) : (DateTimeOffset?)null;
+            // ttlResetOnKey: the app restarts the ttl on each key press and reports closed(ttl) itself
+            var expires = l.TtlMs > 0 && !ResetsOnKey(l) ? clock.GetUtcNow().AddMilliseconds(l.TtlMs) : (DateTimeOffset?)null;
             d.Remove(l.Id);
             d.Order.Add(l.Id);
             d.Shown[l.Id] = new Entry(l, expires);
@@ -160,6 +161,9 @@ public sealed class OverlayQueue(TimeProvider clock)
         old.TrySetResult();
         return seq;
     }
+
+    private static bool ResetsOnKey(ValidatedLayout l)
+        => l.Json["ttlResetOnKey"] is JsonValue v && v.TryGetValue<bool>(out var on) && on;
 
     private DeviceQueue Get(string deviceId) => _devices.GetOrAdd(deviceId, _ => new DeviceQueue());
 

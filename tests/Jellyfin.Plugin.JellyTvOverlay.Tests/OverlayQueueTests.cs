@@ -98,6 +98,20 @@ public class OverlayQueueTests
     }
 
     [Fact]
+    public void Ttl_ResetOnKey_LeftToTheApp()
+    {
+        var clock = new FakeTimeProvider();
+        var q = new OverlayQueue(clock);
+        var l = L("a", 1000);
+        l.Json["ttlResetOnKey"] = true;
+        q.Show("d1", l);
+        clock.Advance(TimeSpan.FromMilliseconds(60000));
+        q.Tick();
+        // the app restarts the ttl on each key and reports closed(ttl) itself
+        Assert.Single(q.Shown("d1"));
+    }
+
+    [Fact]
     public async Task Reconnect_NewSessionId_SameDevice_KeepsQueue()
     {
         var q = new OverlayQueue(new FakeTimeProvider());

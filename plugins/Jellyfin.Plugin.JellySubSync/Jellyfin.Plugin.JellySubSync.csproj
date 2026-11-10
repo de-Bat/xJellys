@@ -19,4 +19,12 @@
     <EmbeddedResource Include="Configuration\configPage.html" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.JellySubSync.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\shared\OverlayClient.cs" Link="OverlayClient.cs" />
+  </ItemGroup>
+
 </Project>

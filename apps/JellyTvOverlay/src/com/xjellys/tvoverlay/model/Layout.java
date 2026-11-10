@@ -17,6 +17,8 @@ public final class Layout {
     public String focus = "passive";
     public String parent;
     public int ttlMs;
+    /** Any key handled by the (interactive) window restarts its ttl. */
+    public boolean ttlResetOnKey;
     public float dim;
     public List<String> closeOn = new ArrayList<String>();
     public List<String> suppressTriggers = new ArrayList<String>();
@@ -45,6 +47,7 @@ public final class Layout {
         String f = str(o, "focus");
         l.focus = ("interactive".equals(f) || "interactive+passthrough".equals(f)) ? f : "passive";
         l.ttlMs = (int) Math.max(0, num(o, "ttlMs", 0));
+        l.ttlResetOnKey = bool(o, "ttlResetOnKey", false);
         l.dim = (float) Math.max(0, Math.min(1, num(o, "dim", 0)));
 
         List<String> close = strList(o.opt("closeOn"));
@@ -97,6 +100,11 @@ public final class Layout {
 
     public boolean interactive() {
         return "interactive".equals(focus) || "interactive+passthrough".equals(focus);
+    }
+
+    /** The window restarts its ttl on each key it handles: interactive, with a ttl and ttlResetOnKey. */
+    public boolean ttlRestartsOnKey() {
+        return ttlResetOnKey && ttlMs > 0 && interactive();
     }
 
     public boolean passthrough() {
