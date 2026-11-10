@@ -306,9 +306,9 @@ A trigger handler may return `{"offer":{"id":"<offerId>","label":"<text>"}}` or 
   - `Api.open` throws `IOException("Plain HTTP is only allowed on the local network")` when `!ServerUrl.allowed(base)`.
   - `MainActivity` shows "Not secured (local network)" under the server name for http.
   - The token is sent only in the `Authorization: MediaBrowser … Token="…"` header. Remove any log lines that print URLs with the token.
-- App logo from `art/logo-source.jpg` (512×286 JPEG): a small `art/make_icons.py` (Pillow) writes:
-  - `res/drawable-xhdpi/banner.png` 320×180: cover-resize the whole image to 16:9.
-  - `res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi}/ic_launcher.png` 48/72/96/144 px: a square centre crop of 286×286 on the triangle, then resize.
+- App logo: a small `art/make_icons.py` (Pillow) writes:
+  - `res/drawable-xhdpi/banner.png` 320×180 from `art/banner-source.jpg`: cover-resize to 16:9 (the source is 512×286, so it loses about 1 px per side and the TV frame stays whole).
+  - `res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi}/ic_launcher.png` 48/72/96/144 px from `art/icon-source.jpg`: a square centre crop of 286×286 on the triangle, then resize.
   - The generated PNGs are committed. The script is run by hand, not by `build.sh`.
 - `test.sh`: downloads `junit-platform-console-standalone-1.11.3.jar` and `json-20240303.jar` from Maven Central into `build/testlib` if missing, compiles `src/**/model` + `logic` classes and `test/**`, and runs the console launcher. Model and logic classes must not import `android.*`.
 

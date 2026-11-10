@@ -244,8 +244,10 @@ user must stay as in JellyXR TV 1.2.2.
 
 ## App logo
 
-Source art: `apps/JellyTvOverlay/art/logo-source.jpg` (from the user; 512×286 JPEG). TV banner
-(16:9) and launcher icon (square, centred crop on the triangle) are generated from it.
+Source art from the user, two 512×286 JPEGs:
+- `apps/JellyTvOverlay/art/banner-source.jpg` (v2, with the TV frame) → TV banner (16:9).
+- `apps/JellyTvOverlay/art/icon-source.jpg` (v1, no frame) → launcher icon (square, centred
+  crop on the triangle). v2's frame leaves stray lines in a square crop.
 
 ## Constraints
 
