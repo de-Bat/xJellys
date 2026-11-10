@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "XRayarr.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.5.0.0: X-Ray markers. Movies and episodes with X-Ray data get an \"X-Ray\" tag and join an \"X-Ray\" collection, so the Android TV app (which can't show plugin UI) shows which items have X-Ray: Collections -> X-Ray, or filter by tag. Optional: also add \"X-Ray\" as a genre so it shows on the TV movie page. New scheduled task \"Mark items with X-Ray data\" (daily 05:00). Settings: Mark items, Also add as genre, Marker name."
+  "changelog": "1.6.0.0: X-Ray items are no longer added to an \"X-Ray\" collection; the collection earlier versions created is deleted on the first marker sync (the next playback or the \"Mark items with X-Ray data\" task). The \"X-Ray\" tag and the optional genre stay."
 }
