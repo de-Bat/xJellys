@@ -35,17 +35,17 @@
           <div class="fieldDescription">Needs the JellyXR TV companion app (APK on the xJellys GitHub releases) on the Android TV box. Devices without the app keep getting text messages.</div>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
-          <label class="emby-checkbox-label"><input id="MarkItems" type="checkbox" is="emby-checkbox" /><span>Mark movies and episodes that have X-Ray data (tag + collection)</span></label>
-          <div class="fieldDescription">Every client shows these, including the Android TV app: the collection appears under Collections, the tag works as a library filter. Kept up to date after each scan and by the scheduled task <em>Mark items with X-Ray data</em> (run it after changing these settings).</div>
+          <label class="emby-checkbox-label"><input id="MarkItems" type="checkbox" is="emby-checkbox" /><span>Mark movies and episodes that have X-Ray data (tag)</span></label>
+          <div class="fieldDescription">The tag works as a library filter in every client, including the Android TV app. Kept up to date after each scan and by the scheduled task <em>Mark items with X-Ray data</em> (run it after changing these settings).</div>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="MarkGenre" type="checkbox" is="emby-checkbox" /><span>Also add it as a genre (shows on the Android TV movie page)</span></label>
           <div class="fieldDescription">The genre line is the only place the Android TV app shows it on the item page. It mixes into the real genres; a metadata refresh that replaces all metadata removes it until the next marker run.</div>
         </div>
         <div class="inputContainer">
-          <label class="inputLabel inputLabelUnfocused" for="MarkerName">Marker name (tag, collection and genre)</label>
+          <label class="inputLabel inputLabelUnfocused" for="MarkerName">Marker name (tag and genre)</label>
           <input id="MarkerName" type="text" is="emby-input" />
-          <div class="fieldDescription">Renaming leaves the old tag/genre on items until the marker task runs; the old collection stays and can be deleted by hand.</div>
+          <div class="fieldDescription">Renaming leaves the old tag/genre on items until the marker task runs.</div>
         </div>
         <div id="fields"></div>
 

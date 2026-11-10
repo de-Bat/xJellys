@@ -1,6 +1,5 @@
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.JellyXR.Configuration;
-using MediaBrowser.Controller.Collections;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -11,21 +10,20 @@ namespace Jellyfin.Plugin.JellyXR;
 
 /// <summary>
 /// Marks movies and episodes that have X-Ray data with Jellyfin metadata the Android TV app shows as is:
-/// a tag, membership in one collection and (opt-in) a genre. Clients cannot run plugin UI, so this is the badge.
+/// a tag and (opt-in) a genre. Clients cannot run plugin UI, so this is the badge.
+/// Earlier versions also added the items to an "X-Ray" collection; that collection is deleted on the first sync.
 /// </summary>
 public sealed class MarkerService
 {
     private readonly ILibraryManager _library;
-    private readonly ICollectionManager _collections;
     private readonly TimelineStore _store;
     private readonly XrayarrClient _xrayarr;
     private readonly ILogger<MarkerService> _logger;
-    private readonly SemaphoreSlim _collectionLock = new(1, 1);
+    private int _collectionRemoved;
 
-    public MarkerService(ILibraryManager library, ICollectionManager collections, TimelineStore store, XrayarrClient xrayarr, ILogger<MarkerService> logger)
+    public MarkerService(ILibraryManager library, TimelineStore store, XrayarrClient xrayarr, ILogger<MarkerService> logger)
     {
         _library = library;
-        _collections = collections;
         _store = store;
         _xrayarr = xrayarr;
         _logger = PluginLog.Wrap(logger);
@@ -67,23 +65,8 @@ public sealed class MarkerService
             }
 
             var has = cfg.MarkItems && await HasDataAsync(item, cfg, ct).ConfigureAwait(false);
+            RemoveLegacyCollection(cfg);
             await ApplyTagsAsync(item, has, cfg, ct).ConfigureAwait(false);
-
-            var boxSet = await CollectionAsync(cfg, create: has).ConfigureAwait(false);
-            if (boxSet is null)
-            {
-                return;
-            }
-
-            var inSet = boxSet.LinkedChildren.Any(c => c.ItemId == item.Id);
-            if (has && !inSet)
-            {
-                await _collections.AddToCollectionAsync(boxSet.Id, new[] { item.Id }).ConfigureAwait(false);
-            }
-            else if (!has && inSet)
-            {
-                await _collections.RemoveFromCollectionAsync(boxSet.Id, new[] { item.Id }).ConfigureAwait(false);
-            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -102,6 +85,7 @@ public sealed class MarkerService
     public async Task SyncAllAsync(IEnumerable<BaseItem> items, IProgress<double> progress, CancellationToken ct)
     {
         var cfg = Plugin.Instance!.Configuration;
+        RemoveLegacyCollection(cfg);
         var list = items.Where(i => i is Movie or Episode).ToList();
         var marked = new List<Guid>();
         var tagged = 0;
@@ -132,26 +116,6 @@ public sealed class MarkerService
             }
 
             progress.Report(90.0 * (i + 1) / Math.Max(1, list.Count));
-        }
-
-        var boxSet = await CollectionAsync(cfg, create: marked.Count > 0).ConfigureAwait(false);
-        if (boxSet is not null)
-        {
-            var current = boxSet.LinkedChildren.Where(c => c.ItemId.HasValue).Select(c => c.ItemId!.Value).ToHashSet();
-            var want = marked.ToHashSet();
-            var add = want.Where(id => !current.Contains(id)).ToList();
-            var remove = current.Where(id => !want.Contains(id)).ToList();
-            if (add.Count > 0)
-            {
-                await _collections.AddToCollectionAsync(boxSet.Id, add).ConfigureAwait(false);
-            }
-
-            if (remove.Count > 0)
-            {
-                await _collections.RemoveFromCollectionAsync(boxSet.Id, remove).ConfigureAwait(false);
-            }
-
-            _logger.LogInformation("X-Ray collection \"{Name}\": {Add} added, {Remove} removed", boxSet.Name, add.Count, remove.Count);
         }
 
         _logger.LogInformation("X-Ray markers: {Marked} of {Count} item(s) have X-Ray data, {Changed} item(s) retagged", marked.Count, list.Count, tagged);
@@ -198,29 +162,34 @@ public sealed class MarkerService
             : values.Where(v => !string.Equals(v, value, StringComparison.OrdinalIgnoreCase)).ToArray();
     }
 
-    /// <summary>The X-Ray collection, created when missing and <paramref name="create"/> is set.</summary>
-    private async Task<BoxSet?> CollectionAsync(PluginConfiguration cfg, bool create)
+    /// <summary>
+    /// Delete the locked "X-Ray" collection that versions 1.5.0.0 and older created. Runs once per server start;
+    /// a collection the user made (not locked) is left alone. Never throws.
+    /// </summary>
+    private void RemoveLegacyCollection(PluginConfiguration cfg)
     {
-        var name = MarkerName(cfg);
-        await _collectionLock.WaitAsync().ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _collectionRemoved, 1) == 1)
+        {
+            return;
+        }
+
         try
         {
-            var existing = _library.ItemsOf(new InternalItemsQuery
+            var name = MarkerName(cfg);
+            var sets = _library.ItemsOf(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.BoxSet },
                 Recursive = true
-            }).OfType<BoxSet>().FirstOrDefault(b => string.Equals(b.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (existing is not null || !create || !cfg.MarkItems)
+            }).OfType<BoxSet>().Where(b => b.IsLocked && string.Equals(b.Name, name, StringComparison.OrdinalIgnoreCase)).ToList();
+            foreach (var set in sets)
             {
-                return existing;
+                _logger.LogInformation("Deleting collection \"{Name}\": X-Ray items are no longer put in a collection", set.Name);
+                _library.DeleteItem(set, new DeleteOptions { DeleteFileLocation = true });
             }
-
-            _logger.LogInformation("Creating collection \"{Name}\" for items with X-Ray data", name);
-            return await _collections.CreateCollectionAsync(new CollectionCreationOptions { Name = name, IsLocked = true }).ConfigureAwait(false);
         }
-        finally
+        catch (Exception ex)
         {
-            _collectionLock.Release();
+            _logger.LogWarning(ex, "Could not delete the old X-Ray collection");
         }
     }
 }

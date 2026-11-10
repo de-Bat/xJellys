@@ -2,7 +2,7 @@ using MediaBrowser.Model.Tasks;
 
 namespace Jellyfin.Plugin.JellyXR;
 
-/// <summary>Tags, collects (and optionally genres) every movie and episode that has X-Ray data.</summary>
+/// <summary>Tags (and optionally genres) every movie and episode that has X-Ray data.</summary>
 public class MarkTask : IScheduledTask
 {
     private readonly FaceScanner _scanner;
@@ -18,7 +18,7 @@ public class MarkTask : IScheduledTask
 
     public string Key => "JellyXRMark";
 
-    public string Description => "Adds the X-Ray tag, collection and (if enabled) genre to movies and episodes with scene data, and removes them from the rest. Run it after changing the marker settings.";
+    public string Description => "Adds the X-Ray tag and (if enabled) genre to movies and episodes with scene data, and removes them from the rest. Run it after changing the marker settings.";
 
     public string Category => "JellyXR";
 
