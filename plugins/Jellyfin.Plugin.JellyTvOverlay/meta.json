@@ -5,6 +5,7 @@
   "overview": "Host for the JellyTvOverlay renderer app. Plugins send layout v1 JSON; the host routes triggers and actions.",
   "owner": "xJellys",
   "category": "General",
+  "imagePath": "JellyTvOverlay.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "Initial scaffold"
+  "changelog": "Initial release"
 }
