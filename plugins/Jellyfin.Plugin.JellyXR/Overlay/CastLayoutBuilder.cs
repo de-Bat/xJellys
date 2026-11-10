@@ -166,7 +166,6 @@ public static class CastLayoutBuilder
         {
             ["type"] = "row",
             ["id"] = "p" + index,
-            ["person"] = c.Actor,
             ["gap"] = Frac(12),
             ["children"] = kids,
         };

@@ -29,6 +29,8 @@ public sealed class OverlayClientHost : IHostedService
     private readonly ILibraryManager _library;
     private readonly CardService _cards;
     private readonly ILogger<OverlayClientHost> _logger;
+    private readonly CastShowGate _gate = new();
+    private int _showsStarted;
 
     public OverlayClientHost(ISessionManager sessions, ILibraryManager library, CardService cards, ILogger<OverlayClientHost> logger)
     {
@@ -36,7 +38,27 @@ public sealed class OverlayClientHost : IHostedService
         _library = library;
         _cards = cards;
         _logger = PluginLog.Wrap(logger);
+        Config = () => Plugin.Instance?.Configuration;
+        AppPresent = d => OverlayClient.Current?.HasApp(d) == true;
+        ShowLayout = (d, json) => OverlayClient.Current?.Show(d, json) == true;
+        FindSession = id => _sessions.Sessions.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal)) is { } s
+            ? (s.Client, s.DeviceName)
+            : null;
     }
+
+    // Seams for tests; production values are set in the constructor.
+    internal Func<Configuration.PluginConfiguration?> Config { get; set; }
+
+    internal Func<string, bool> AppPresent { get; set; }
+
+    internal Func<string, string, bool> ShowLayout { get; set; }
+
+    internal Func<string?, (string? Client, string? DeviceName)?> FindSession { get; set; }
+
+    internal CastShowGate Gate => _gate;
+
+    /// <summary>Background builds started (tests).</summary>
+    internal int ShowsStarted => Volatile.Read(ref _showsStarted);
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -55,7 +77,7 @@ public sealed class OverlayClientHost : IHostedService
         !string.IsNullOrEmpty(deviceId) && EnsureBound()?.HasApp(deviceId) == true;
 
     /// <summary>Host event handler. Must answer fast: card building runs after it returns.</summary>
-    private Task<string?> OnEventAsync(string json)
+    internal Task<string?> OnEventAsync(string json)
     {
         try
         {
@@ -84,6 +106,13 @@ public sealed class OverlayClientHost : IHostedService
             case "trigger":
             {
                 var trigger = Str(e, "trigger");
+                if (trigger is "resume" or "stop" or "itemStart")
+                {
+                    // the cast panel closes on these (closeOn); builds still running are stale
+                    _gate.Invalidate(deviceId);
+                    return null;
+                }
+
                 if (trigger is not ("pause" or "doublePause") || Wanted(deviceId, Str(e, "sessionId")) is not { } cfg)
                 {
                     return null;
@@ -107,6 +136,15 @@ public sealed class OverlayClientHost : IHostedService
 
                 return null;
 
+            case "closed":
+                // "replaced" = the app swapped in a newer show of the same id (e.g. passive -> interactive): still up
+                if (Str(e, "layoutId") == ClientId + "/" + CastLayoutBuilder.LayoutId && Str(e, "reason") != "replaced")
+                {
+                    _gate.Closed(deviceId);
+                }
+
+                return null;
+
             case "action":
                 if (Str(e, "action") is { } action && action.StartsWith("actor:", StringComparison.Ordinal))
                 {
@@ -124,14 +162,13 @@ public sealed class OverlayClientHost : IHostedService
     /// <summary>TV overlay on, the device has the app, and the session's client matches the client filter.</summary>
     private Configuration.PluginConfiguration? Wanted(string deviceId, string? sessionId)
     {
-        var cfg = Plugin.Instance?.Configuration;
-        if (cfg is not { Enabled: true, TvOverlay: true } || Current()?.HasApp(deviceId) != true)
+        var cfg = Config();
+        if (cfg is not { Enabled: true, TvOverlay: true } || !AppPresent(deviceId))
         {
             return null;
         }
 
-        var session = _sessions.Sessions.FirstOrDefault(s => string.Equals(s.Id, sessionId, StringComparison.Ordinal));
-        if (session is null)
+        if (FindSession(sessionId) is not { } session)
         {
             _logger.LogDebug("No cast panel on {Device}: session {Session} not found", deviceId, sessionId);
             return null;
@@ -146,15 +183,15 @@ public sealed class OverlayClientHost : IHostedService
         return cfg;
     }
 
-    private static OverlayClient? Current() => OverlayClient.Current;
-
     private void StartShow(string deviceId, string? itemId, long positionTicks, bool interactive)
     {
+        var generation = _gate.Begin(deviceId);
+        Interlocked.Increment(ref _showsStarted);
         _ = Task.Run(async () =>
         {
             try
             {
-                await ShowAsync(deviceId, itemId, positionTicks, interactive).ConfigureAwait(false);
+                await ShowAsync(deviceId, itemId, positionTicks, interactive, generation).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -163,11 +200,10 @@ public sealed class OverlayClientHost : IHostedService
         });
     }
 
-    private async Task ShowAsync(string deviceId, string? itemId, long positionTicks, bool interactive)
+    private async Task ShowAsync(string deviceId, string? itemId, long positionTicks, bool interactive, long generation)
     {
-        var cfg = Plugin.Instance?.Configuration;
-        var client = Current();
-        if (cfg is null || client is null || !Guid.TryParse(itemId, out var id))
+        var cfg = Config();
+        if (cfg is null || !Guid.TryParse(itemId, out var id))
         {
             return;
         }
@@ -197,7 +233,8 @@ public sealed class OverlayClientHost : IHostedService
             layout["ttlMs"] = cfg.OverlaySeconds * 1000;
         }
 
-        var shown = client.Show(deviceId, layout.ToJsonString());
+        var json = layout.ToJsonString();
+        var shown = _gate.TryShow(deviceId, generation, interactive, () => ShowLayout(deviceId, json));
         if (shown)
         {
             _logger.LogInformation(
@@ -209,8 +246,8 @@ public sealed class OverlayClientHost : IHostedService
         }
         else
         {
-            // e.g. playback resumed while the cards were built (the host rejects a stale show)
-            _logger.LogDebug("Cast panel for {Item} on {Device} not shown (rejected by the host)", item.Name, deviceId);
+            // a newer build or an interactive panel won, or the host rejected a stale show (playback resumed meanwhile)
+            _logger.LogDebug("Cast panel for {Item} on {Device} not shown (superseded or rejected by the host)", item.Name, deviceId);
         }
     }
 

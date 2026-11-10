@@ -38,7 +38,12 @@ public class CastLayoutBuilderTests
 
     private static JsonObject PagesOf(JsonObject layout) => Walk(layout["root"]).Single(n => Str(n["type"]) == "pages");
 
-    private static List<JsonObject> PersonRows(JsonNode page) => Walk(page).Where(n => Str(n["type"]) == "row" && n["person"] is not null).ToList();
+    // person rows carry ids p0..pn; the header row has none
+    private static List<JsonObject> PersonRows(JsonNode page) =>
+        Walk(page).Where(n => Str(n["type"]) == "row" && Str(n["id"]) is { } id && id.StartsWith('p')).ToList();
+
+    /// <summary>The row's first text is the actor name.</summary>
+    private static string? NameOf(JsonObject row) => Walk(row).Where(n => Str(n["type"]) == "text").Select(n => Str(n["text"])).FirstOrDefault();
 
     [Fact]
     public void Build_Basics()
@@ -75,12 +80,12 @@ public class CastLayoutBuilderTests
         Assert.Equal("interactive", Str(layout["focus"]));
         var rows = PersonRows(PagesOf(layout));
         Assert.Equal(2, rows.Count);
-        var adaRow = rows.Single(r => Str(r["person"]) == "Ada");
+        var adaRow = rows.Single(r => NameOf(r) == "Ada");
         Assert.True(adaRow["focusable"]!.GetValue<bool>());
         Assert.Equal($"actor:{ada.PersonId:N}", Str(adaRow["action"]));
         Assert.False(string.IsNullOrEmpty(Str(adaRow["id"])));
 
-        var cyRow = rows.Single(r => Str(r["person"]) == "Cy");
+        var cyRow = rows.Single(r => NameOf(r) == "Cy");
         Assert.Null(cyRow["focusable"]);
         Assert.Null(cyRow["action"]);
 
@@ -115,7 +120,7 @@ public class CastLayoutBuilderTests
         var set = new CardSet("On screen", new[] { Person("Rest1"), Person("On1", true), Person("Rest2"), Person("On2", true) });
         var layout = CastLayoutBuilder.Build(set, interactive: false);
 
-        var names = PersonRows(PagesOf(layout)).Select(r => Str(r["person"])).ToList();
+        var names = PersonRows(PagesOf(layout)).Select(r => NameOf(r)).ToList();
         Assert.Equal(new[] { "On1", "On2", "Rest1", "Rest2" }, names);
         var texts = Walk(layout["root"]).Where(n => Str(n["type"]) == "text").Select(n => Str(n["text"])).ToList();
         Assert.Contains("On screen", texts);
