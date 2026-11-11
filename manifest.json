@@ -223,5 +223,24 @@
         "timestamp": "2026-11-09T22:03:04Z"
       }
     ]
+  },
+  {
+    "guid": "9b2bf30d-ca33-43a8-b8a7-643f51573c1c",
+    "name": "JellyTvOverlay",
+    "description": "Generic TV overlay host: other plugins show layouts on the JellyTvOverlay Android TV app.",
+    "overview": "Host for the JellyTvOverlay renderer app. Plugins send layout v1 JSON; the host routes triggers and actions.",
+    "owner": "xJellys",
+    "category": "General",
+    "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.JellyTvOverlay/JellyTvOverlay.png",
+    "versions": [
+      {
+        "version": "1.0.0.0",
+        "changelog": "Initial release",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyTvOverlay-v1.0.0.0/Jellyfin.Plugin.JellyTvOverlay_1.0.0.0.zip",
+        "checksum": "CF3C8E7DD691F728E58A708BDF563076",
+        "timestamp": "2026-11-11T06:20:29Z"
+      }
+    ]
   }
 ]
