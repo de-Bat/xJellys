@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.Jellycap;
 
 /// <summary>Endpoints for the JellyXR TV companion app, which draws Jellycap's text cards over the player.</summary>
+// [Obsolete] (comment only): kept working this release for the retired JellyXR TV app. Devices running the
+// JellyTvOverlay app get the cards through Overlay/OverlayClientHost + RecapOverlayDriver instead.
 [ApiController]
 [Route("Jellycap")]
 public sealed class OverlayController : ControllerBase

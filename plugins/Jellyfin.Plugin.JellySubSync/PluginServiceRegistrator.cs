@@ -10,5 +10,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<SubSyncStore>();
         serviceCollection.AddSingleton<SubSyncService>();
+        serviceCollection.AddSingleton<Overlay.OverlayClientHost>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Overlay.OverlayClientHost>());
     }
 }

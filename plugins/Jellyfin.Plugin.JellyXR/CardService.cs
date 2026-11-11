@@ -7,7 +7,9 @@ namespace Jellyfin.Plugin.JellyXR;
 
 /// <param name="Info">Appearance summary ("34 min on screen, next at 1:12:40"), when enabled and known.</param>
 /// <param name="OnScreen">Seen around the pause position (scene data), as opposed to the rest of the cast.</param>
-public readonly record struct Card(string Actor, string? Character, string? Info = null, bool OnScreen = false);
+/// <param name="PersonId">Jellyfin person item, when the actor is in the item's people.</param>
+/// <param name="ImageUrl">Server-relative portrait URL, when the person has a primary image.</param>
+public readonly record struct Card(string Actor, string? Character, string? Info = null, bool OnScreen = false, Guid? PersonId = null, string? ImageUrl = null);
 
 public readonly record struct CardSet(string Header, IReadOnlyList<Card> Cards);
 
@@ -165,6 +167,28 @@ public sealed class CardService
             return set;
         }
     }
+
+    /// <summary>
+    /// Adds the Jellyfin person id and portrait URL to cards whose actor is in the item's people (matched by name).
+    /// Only the TV overlay panel needs them, so the toast path does not pay for the lookups.
+    /// </summary>
+    public CardSet WithPeople(BaseItem item, CardSet set)
+    {
+        var cast = _scanner.CastOf(item);
+        var cards = set.Cards.Select(c =>
+        {
+            if (!cast.Any(p => string.Equals(p.Name, c.Actor, StringComparison.OrdinalIgnoreCase)))
+            {
+                return c;
+            }
+
+            var (id, hasImage) = _timelines.PersonOf(c.Actor);
+            return id is { } g ? c with { PersonId = g, ImageUrl = hasImage ? PortraitUrl(g) : null } : c;
+        }).ToList();
+        return set with { Cards = cards };
+    }
+
+    public static string PortraitUrl(Guid personId) => $"/Items/{personId:N}/Images/Primary?maxHeight=128";
 
     public static string Format(Card card, bool showCharacter)
     {

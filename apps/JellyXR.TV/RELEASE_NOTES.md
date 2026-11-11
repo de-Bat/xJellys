@@ -1,3 +1,5 @@
+**Deprecated:** JellyXR TV is replaced by the JellyTvOverlay app. It keeps working this release; install JellyTvOverlay and uninstall JellyXR TV (two panels otherwise).
+
 JellyXR TV: companion app for Jellyfin on Android TV. Pause a movie or episode in Jellyfin and a panel with the cast (portraits, characters, who is on screen) appears over the player; it goes away when you resume.
 
 **New in 1.2.2:** no more Jellyfin crash after a subtitle sync. Jellyfin for Android TV crashes when another app restarts its playback, so after OK the app now stops the player and you press play to resume (Jellyfin keeps the spot); it then switches to the "Synced" track by itself.

@@ -29,7 +29,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public string TranslationApiKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// When the JellyXR TV app runs on the playback device, it draws the text cards over the player:
+    /// When a TV overlay app (JellyTvOverlay, or the older JellyXR TV) runs on the playback device, it draws the text cards over the player:
     /// Text recaps pause the episode for the cards (no video), Both recaps play the clips with the cards on top.
     /// </summary>
     public bool TvOverlay { get; set; } = true;

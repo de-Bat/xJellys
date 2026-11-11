@@ -31,8 +31,12 @@
           <label class="emby-checkbox-label"><input id="WebOverlay" type="checkbox" is="emby-checkbox" /><span>Web client: on pause show a panel with cast portraits (instead of a text message)</span></label>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
-          <label class="emby-checkbox-label"><input id="TvOverlay" type="checkbox" is="emby-checkbox" /><span>JellyXR TV app: on pause show the portraits panel over the Android TV player (instead of text messages)</span></label>
-          <div class="fieldDescription">Needs the JellyXR TV companion app (APK on the xJellys GitHub releases) on the Android TV box. Devices without the app keep getting text messages.</div>
+          <label class="emby-checkbox-label"><input id="TvOverlay" type="checkbox" is="emby-checkbox" /><span>TV app: on pause show the portraits panel over the Android TV player (instead of text messages)</span></label>
+          <div class="fieldDescription">Needs the JellyTvOverlay app and plugin (or the older JellyXR TV companion app) on the Android TV box. Devices without the app keep getting text messages. Use one app per TV: with both JellyTvOverlay and the old JellyXR TV app installed you get two panels, so uninstall JellyXR TV.</div>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="TvPanelInteractive" type="checkbox" is="emby-checkbox" /><span>JellyTvOverlay: interactive cast panel (offered on pause, rows selectable)</span></label>
+          <div class="fieldDescription">Off: the panel appears by itself on pause and the remote keeps driving the player. On: pausing offers the panel and it opens with ▲ ▼ / OK on the cast list, while Play/Pause and ◀ ▶ (seek) keep going to the player. A double pause (pause, play, pause within 4 s) always offers it, fully interactive: it holds the remote (◀ ▶ flip pages). BACK always closes the panel and gives the remote back.</div>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="MarkItems" type="checkbox" is="emby-checkbox" /><span>Mark movies and episodes that have X-Ray data (tag)</span></label>
@@ -212,6 +216,7 @@
           page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
           page.querySelector('#WebOverlay').checked = c.WebOverlay !== false;
           page.querySelector('#TvOverlay').checked = c.TvOverlay !== false;
+          page.querySelector('#TvPanelInteractive').checked = c.TvPanelInteractive === true;
           page.querySelector('#MarkItems').checked = c.MarkItems !== false;
           page.querySelector('#MarkGenre').checked = c.MarkGenre === true;
           page.querySelector('#MarkerName').value = c.MarkerName || 'X-Ray';
@@ -302,6 +307,7 @@
           c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
           c.WebOverlay = page.querySelector('#WebOverlay').checked;
           c.TvOverlay = page.querySelector('#TvOverlay').checked;
+          c.TvPanelInteractive = page.querySelector('#TvPanelInteractive').checked;
           c.MarkItems = page.querySelector('#MarkItems').checked;
           c.MarkGenre = page.querySelector('#MarkGenre').checked;
           c.MarkerName = page.querySelector('#MarkerName').value.trim() || 'X-Ray';

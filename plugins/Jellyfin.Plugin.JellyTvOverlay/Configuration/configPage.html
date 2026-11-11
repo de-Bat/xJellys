@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>JellyTvOverlay</title></head>
+<body>
+<div id="JellyTvOverlayConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+  <div data-role="content">
+    <div class="content-primary">
+      <form id="JellyTvOverlayConfigForm">
+        <label class="checkboxContainer">
+          <input id="Enabled" name="Enabled" type="checkbox" is="emby-checkbox" />
+          <span>Enabled</span>
+        </label>
+        <label class="checkboxContainer">
+          <input id="DebugEndpoints" name="DebugEndpoints" type="checkbox" is="emby-checkbox" />
+          <span>Debug endpoints</span>
+        </label>
+        <div class="fieldDescription">Debug aid for administrators: enables POST JellyTvOverlay/Debug/Show?deviceId=... (body = layout JSON), shown as owner "debug". Leave off normally.</div>
+
+        <h2>Client plugins</h2>
+        <div class="fieldDescription">Plugins that draw overlays through JellyTvOverlay.</div>
+        <ul id="ClientList"></ul>
+
+        <h2>Devices</h2>
+        <div class="fieldDescription">TV devices whose JellyTvOverlay app checked in within the last 90 seconds. A switched-off device gets no overlays; plugins fall back to their usual behaviour there.</div>
+        <div id="DeviceList"></div>
+
+        <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
+      </form>
+    </div>
+  </div>
+  <script type="text/javascript">
+    (function () {
+      var guid = '9b2bf30d-ca33-43a8-b8a7-643f51573c1c';
+      var page = document.querySelector('#JellyTvOverlayConfigPage');
+
+      function text(tag, value) {
+        var el = document.createElement(tag);
+        el.textContent = value;
+        return el;
+      }
+
+      function loadClients() {
+        var list = page.querySelector('#ClientList');
+        list.innerHTML = '';
+        return ApiClient.getJSON(ApiClient.getUrl('JellyTvOverlay/Clients')).then(function (clients) {
+          if (!clients.length) {
+            list.appendChild(text('li', 'None registered yet.'));
+          }
+          clients.forEach(function (c) {
+            list.appendChild(text('li', (c.DisplayName || c.Id) + ' (' + c.Id + ')'));
+          });
+        });
+      }
+
+      function loadDevices() {
+        var box = page.querySelector('#DeviceList');
+        box.innerHTML = '';
+        return ApiClient.getJSON(ApiClient.getUrl('JellyTvOverlay/Devices')).then(function (devices) {
+          if (!devices.length) {
+            box.appendChild(text('div', 'No device has checked in recently.'));
+          }
+          devices.forEach(function (d) {
+            var label = document.createElement('label');
+            label.className = 'checkboxContainer';
+            var input = document.createElement('input');
+            input.type = 'checkbox';
+            input.setAttribute('is', 'emby-checkbox');
+            input.className = 'deviceSwitch';
+            input.setAttribute('data-device', d.DeviceId);
+            input.checked = d.Enabled;
+            var name = (d.DeviceName || d.DeviceId) + (d.UserName ? ' - ' + d.UserName : '') + (d.Fresh ? '' : ' (not seen recently)');
+            label.appendChild(input);
+            label.appendChild(text('span', name));
+            box.appendChild(label);
+          });
+        });
+      }
+
+      page.addEventListener('pageshow', function () {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          page.querySelector('#Enabled').checked = c.Enabled !== false;
+          page.querySelector('#DebugEndpoints').checked = c.DebugEndpoints === true;
+          return Promise.all([loadClients(), loadDevices()]);
+        }).finally(function () {
+          Dashboard.hideLoadingMsg();
+        });
+      });
+
+      page.querySelector('#JellyTvOverlayConfigForm').addEventListener('submit', function (e) {
+        Dashboard.showLoadingMsg();
+        ApiClient.getPluginConfiguration(guid).then(function (c) {
+          c.Enabled = page.querySelector('#Enabled').checked;
+          c.DebugEndpoints = page.querySelector('#DebugEndpoints').checked;
+          var off = (c.DisabledDevices || []).slice();
+          page.querySelectorAll('.deviceSwitch').forEach(function (s) {
+            var id = s.getAttribute('data-device');
+            var i = off.indexOf(id);
+            if (s.checked && i >= 0) {
+              off.splice(i, 1);
+            } else if (!s.checked && i < 0) {
+              off.push(id);
+            }
+          });
+          c.DisabledDevices = off;
+          ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+        });
+        e.preventDefault();
+        return false;
+      });
+    })();
+  </script>
+</div>
+</body>
+</html>

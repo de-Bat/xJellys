@@ -1,0 +1,11 @@
+{
+  "guid": "9b2bf30d-ca33-43a8-b8a7-643f51573c1c",
+  "name": "JellyTvOverlay",
+  "description": "Generic TV overlay host: other plugins show layouts on the JellyTvOverlay Android TV app.",
+  "overview": "Host for the JellyTvOverlay renderer app. Plugins send layout v1 JSON; the host routes triggers and actions.",
+  "owner": "xJellys",
+  "category": "General",
+  "imagePath": "JellyTvOverlay.png",
+  "targetAbi": "10.9.0.0",
+  "changelog": "Initial release"
+}

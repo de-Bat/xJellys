@@ -15,6 +15,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<FfmpegRecapBuilder>();
         serviceCollection.AddSingleton<RecapService>();
         serviceCollection.AddSingleton<OverlayStore>();
+        serviceCollection.AddSingleton<Overlay.OverlayClientHost>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<Overlay.OverlayClientHost>());
         serviceCollection.AddHostedService<RecapCoordinator>();
     }
 }

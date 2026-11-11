@@ -7,5 +7,5 @@
   "category": "General",
   "imagePath": "XRayarr.png",
   "targetAbi": "10.9.0.0",
-  "changelog": "1.6.0.0: X-Ray items are no longer added to an \"X-Ray\" collection; the collection earlier versions created is deleted on the first marker sync (the next playback or the \"Mark items with X-Ray data\" task). The \"X-Ray\" tag and the optional genre stay."
+  "changelog": "1.7.0.0: Cast panel works with the JellyTvOverlay app (JellyXR TV is still supported this release); new actor detail with bio and titles in your library. 1.6.0.0: X-Ray items are no longer added to an \"X-Ray\" collection; the collection earlier versions created is deleted on the first marker sync (the next playback or the \"Mark items with X-Ray data\" task). The \"X-Ray\" tag and the optional genre stay."
 }

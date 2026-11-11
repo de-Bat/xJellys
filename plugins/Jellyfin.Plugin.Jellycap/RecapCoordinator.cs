@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Jellyfin.Plugin.Jellycap.Configuration;
+using Jellyfin.Plugin.Jellycap.Overlay;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
@@ -17,18 +18,28 @@ public sealed class RecapCoordinator : IHostedService
 {
     private sealed record Pending(Guid RecapId, Guid EpisodeId, long StartTicks);
 
+    /// <summary>Who draws the text cards on the device: nobody (burnt into the video), the JellyTvOverlay app, or the old JellyXR TV app.</summary>
+    private enum CardTarget
+    {
+        Video,
+        OverlayApp,
+        Companion
+    }
+
     private readonly ISessionManager _sessions;
     private readonly RecapService _recaps;
     private readonly OverlayStore _overlays;
+    private readonly OverlayClientHost _overlayHost;
     private readonly ILogger<RecapCoordinator> _logger;
     private readonly ConcurrentDictionary<string, Pending> _pending = new();
     private readonly ConcurrentDictionary<(string Session, Guid Episode), byte> _skip = new();
 
-    public RecapCoordinator(ISessionManager sessions, RecapService recaps, OverlayStore overlays, ILogger<RecapCoordinator> logger)
+    public RecapCoordinator(ISessionManager sessions, RecapService recaps, OverlayStore overlays, OverlayClientHost overlayHost, ILogger<RecapCoordinator> logger)
     {
         _sessions = sessions;
         _recaps = recaps;
         _overlays = overlays;
+        _overlayHost = overlayHost;
         _logger = PluginLog.Wrap(logger);
     }
 
@@ -118,7 +129,8 @@ public sealed class RecapCoordinator : IHostedService
         }
 
         var fmt = decision.Format;
-        var companion = UsesCompanion(cfg, session);
+        var target = Target(cfg, session);
+        var companion = target != CardTarget.Video;
         var overlay = companion && fmt != RecapFormat.Video;
         var startTicks = e.PlaybackPositionTicks ?? 0;
         var pos = TimeSpan.FromTicks(startTicks);
@@ -157,15 +169,34 @@ public sealed class RecapCoordinator : IHostedService
             return;
         }
 
-        _logger.LogDebug("Recap wanted for {Episode}: mode {Mode}, format {Format}, position {Pos}, JellyXR TV overlay {Overlay}", episode.Name, mode, fmt, pos, overlay);
+        _logger.LogDebug("Recap wanted for {Episode}: mode {Mode}, format {Format}, position {Pos}, text cards drawn by {Target}", episode.Name, mode, fmt, pos, overlay ? target : CardTarget.Video);
         var wait = TimeSpan.FromSeconds(Math.Max(5, cfg.MaxWaitSeconds));
+        var started = DateTime.UtcNow;
         if (overlay && fmt == RecapFormat.Text)
         {
-            await PrepareTextOverlayAsync(session, episode, mode, pos, startTicks, wait, cfg).ConfigureAwait(false);
-            return;
+            if (target == CardTarget.Companion)
+            {
+                await PrepareTextOverlayAsync(session, episode, mode, pos, startTicks, wait, cfg).ConfigureAwait(false);
+                return;
+            }
+
+            if (await ShowTextOnAppAsync(session, episode, mode, pos, startTicks, wait, cfg).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            // the host refused the cards (nothing was paused): today's text recap video, if it is still ready in time
+            overlay = false;
+            wait -= DateTime.UtcNow - started;
+            if (wait < TimeSpan.FromSeconds(5))
+            {
+                _logger.LogInformation("No time left for a recap video for {Episode}; playing it", episode.Name);
+                return;
+            }
+
+            started = DateTime.UtcNow;
         }
 
-        var started = DateTime.UtcNow;
         // Both + JellyXR TV: the video has the clips only, the app draws each text card over its clip
         var fileTask = _recaps.EnsureRecapFileAsync(episode, mode, pos, overlay ? RecapFormat.Video : fmt);
         var cardsTask = overlay ? _recaps.Planner.PlanAsync(episode, mode, pos, RecapFormat.Both, cfg, CancellationToken.None) : null;
@@ -192,7 +223,7 @@ public sealed class RecapCoordinator : IHostedService
 
         if (cardsTask is not null)
         {
-            await ShareCardsAsync(session, item.Id, cardsTask, wait - (DateTime.UtcNow - started)).ConfigureAwait(false);
+            await ShareCardsAsync(session, item.Id, cardsTask, wait - (DateTime.UtcNow - started), target).ConfigureAwait(false);
         }
 
         _pending[session.Id] = new Pending(item.Id, episode.Id, startTicks);
@@ -250,7 +281,7 @@ public sealed class RecapCoordinator : IHostedService
             return;
         }
 
-        var companion = UsesCompanion(cfg, session);
+        var companion = Target(cfg, session) != CardTarget.Video;
         var ticks = e.PlaybackPositionTicks ?? 0;
         var runtime = episode.RunTimeTicks ?? 0;
         var finished = e.PlayedToCompletion || (runtime > 0 && ticks >= runtime * 0.9);
@@ -321,8 +352,40 @@ public sealed class RecapCoordinator : IHostedService
         }
     }
 
-    /// <summary>Both recap on the JellyXR TV overlay: hands the app the cards to draw over the clips-only video.</summary>
-    private async Task ShareCardsAsync(SessionInfo session, Guid recapItemId, Task<IReadOnlyList<RecapSegment>> plan, TimeSpan left)
+    /// <summary>
+    /// Text recap on the JellyTvOverlay app: no video; the driver shows the cards and holds the episode paused, then
+    /// seeks back and plays. True = handled (shown, nothing to recap, or not ready in time). False = the host refused
+    /// the cards and nothing was paused: the caller falls back to the recap video.
+    /// </summary>
+    private async Task<bool> ShowTextOnAppAsync(SessionInfo session, Episode episode, RecapMode mode, TimeSpan pos, long startTicks, TimeSpan wait, PluginConfiguration cfg)
+    {
+        var planTask = _recaps.Planner.PlanAsync(episode, mode, pos, RecapFormat.Text, cfg, CancellationToken.None);
+        if (await Task.WhenAny(planTask, Task.Delay(wait)).ConfigureAwait(false) != planTask)
+        {
+            _logger.LogInformation("Text recap for {Episode} not ready in {Wait}s; skipping this time", episode.Name, wait.TotalSeconds);
+            return true;
+        }
+
+        var cards = OverlayStore.Sequential(await planTask.ConfigureAwait(false));
+        if (cards.Count == 0)
+        {
+            _logger.LogInformation("No recap for {Episode}: nothing to recap", episode.Name);
+            return true;
+        }
+
+        var recap = new OverlayRecap { ItemId = episode.Id, SessionId = session.Id, Mode = OverlayMode.Pause, ResumeTicks = startTicks, Cards = cards, Ready = true };
+        if (await _overlayHost.Driver.OnReady(session.DeviceId, recap).ConfigureAwait(false))
+        {
+            _logger.LogInformation("Text recap for {Episode} on the JellyTvOverlay app of {Device} ({Cards} card(s))", episode.Name, session.DeviceName, cards.Count);
+            return true;
+        }
+
+        _logger.LogInformation("JellyTvOverlay refused the text recap for {Episode} on {Device}; falling back to the recap video", episode.Name, session.DeviceName);
+        return false;
+    }
+
+    /// <summary>Both recap on a TV overlay app: hands the app the cards to draw over the clips-only video.</summary>
+    private async Task ShareCardsAsync(SessionInfo session, Guid recapItemId, Task<IReadOnlyList<RecapSegment>> plan, TimeSpan left, CardTarget target)
     {
         try
         {
@@ -336,7 +399,15 @@ public sealed class RecapCoordinator : IHostedService
             var cards = OverlayStore.OverClips(await plan.ConfigureAwait(false));
             if (cards.Count > 0)
             {
-                _overlays.Set(session.DeviceId, new OverlayRecap { ItemId = recapItemId, SessionId = session.Id, Mode = OverlayMode.Timed, Cards = cards, Ready = true });
+                var recap = new OverlayRecap { ItemId = recapItemId, SessionId = session.Id, Mode = OverlayMode.Timed, Cards = cards, Ready = true };
+                if (target == CardTarget.OverlayApp)
+                {
+                    await _overlayHost.Driver.OnReady(session.DeviceId, recap).ConfigureAwait(false);
+                }
+                else
+                {
+                    _overlays.Set(session.DeviceId, recap);
+                }
             }
         }
         catch (Exception ex)
@@ -345,8 +416,24 @@ public sealed class RecapCoordinator : IHostedService
         }
     }
 
-    private static bool UsesCompanion(PluginConfiguration cfg, SessionInfo session)
-        => cfg.TvOverlay && CompanionRegistry.IsActive(session.DeviceId);
+    /// <summary>
+    /// "Show text cards with the TV overlay app": the JellyTvOverlay app when the host is bound and the device runs it,
+    /// else the old JellyXR TV companion (heartbeat), else burnt into the recap video. Never two for one device.
+    /// </summary>
+    private CardTarget Target(PluginConfiguration cfg, SessionInfo session)
+    {
+        if (!cfg.TvOverlay)
+        {
+            return CardTarget.Video;
+        }
+
+        if (_overlayHost.HasApp(session.DeviceId))
+        {
+            return CardTarget.OverlayApp;
+        }
+
+        return CompanionRegistry.IsActive(session.DeviceId) ? CardTarget.Companion : CardTarget.Video;
+    }
 
     /// <summary>Format of the video to build. With the JellyXR TV overlay the text lives in the app: Text = no video, Both = clips only.</summary>
     private static RecapFormat? VideoFormat(RecapFormat fmt, bool companion)
