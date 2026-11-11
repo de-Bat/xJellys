@@ -150,9 +150,10 @@ public final class Renderer {
             v = timed(n, "pages".equals(t), ibw, ibh, scroller);
         } else if ("text".equals(t)) {
             v = text(n);
-            if (v instanceof ScrollView && h < 0 && n.maxLines() > 0) {
+            ScrollView sv = n.scroll() && n.id != null ? refs.scrollTexts.get(n.id) : null;
+            if (sv != null && h < 0 && n.maxLines() > 0) {
                 // a scroll text shows maxLines lines; the rest scrolls inside the box
-                lh = n.maxLines() * ((TextView) ((ScrollView) v).getChildAt(0)).getLineHeight() + 2 * pad;
+                lh = n.maxLines() * ((TextView) sv.getChildAt(0)).getLineHeight() + 2 * pad;
             }
         } else if ("value".equals(t)) {
             v = value(n);
@@ -177,7 +178,7 @@ public final class Renderer {
         }
         if (n.focusable && n.id != null) {
             refs.focusables.put(n.id, v);
-            refs.rings.put(n.id, ring(round, "button".equals(t) && n.radius <= 0 ? 0.01f * sh : n.radius * sh));
+            refs.rings.put(n.id, ring(round, "button".equals(t) && n.radius <= 0 ? 0.01f * sh : n.radius * sh, "image".equals(t)));
             if (scroller != null) refs.scrollerOf.put(n.id, scroller);
         }
         if (v instanceof ImageView && "image".equals(t) && images != null) images.into((ImageView) v, n.src());
@@ -268,7 +269,10 @@ public final class Renderer {
         return tv;
     }
 
-    /** Plain text: maxLines with an ellipsis. scroll:true: the full text in a ScrollView (not focusable). */
+    /**
+     * Plain text: maxLines with an ellipsis. scroll:true: the full text in a ScrollView (not focusable) inside a
+     * plain frame; the frame carries padding, background and the focus ring, so the ring does not scroll with the text.
+     */
     private View text(Node n) {
         TextView tv = label(n.text(), n, n.color());
         int ml = n.maxLines();
@@ -285,7 +289,9 @@ public final class Renderer {
         sv.setOverScrollMode(View.OVER_SCROLL_NEVER);
         sv.addView(tv, new FrameLayout.LayoutParams(MATCH, WRAP));
         if (n.id != null) refs.scrollTexts.put(n.id, sv);
-        return sv;
+        FrameLayout box = new FrameLayout(ctx);
+        box.addView(sv, new FrameLayout.LayoutParams(MATCH, MATCH));
+        return box;
     }
 
     private View value(Node n) {
@@ -339,12 +345,15 @@ public final class Renderer {
         if (oval || r > 0) v.setClipToOutline(true);
     }
 
-    /** Focus look from the mockup: 2 dp #4AA3FF outline over a #224AA3FF fill. */
-    private Drawable ring(boolean oval, float radius) {
+    /**
+     * Focus look from the mockup: 2 dp #4AA3FF outline over a #224AA3FF fill. Images get a 4 dp outline: on a busy
+     * poster a 2 dp one is hard to see.
+     */
+    private Drawable ring(boolean oval, float radius, boolean image) {
         GradientDrawable g = new GradientDrawable();
         if (oval) g.setShape(GradientDrawable.OVAL); else g.setCornerRadius(Math.max(0, radius));
         g.setColor(RING_FILL);
-        g.setStroke(Math.max(1, Math.round(2 * density)), RING);
+        g.setStroke(Math.max(1, Math.round((image ? 4 : 2) * density)), RING);
         return g;
     }
 }
