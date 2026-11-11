@@ -26,7 +26,7 @@ public sealed class OverlayClientHost : IHostedService
     {
         _sessions = sessions;
         _logger = PluginLog.Wrap(logger);
-        Driver = new RecapOverlayDriver(SendAsync, TimeProvider.System) { Logger = _logger };
+        Driver = new RecapOverlayDriver(SendAsync, TimeProvider.System) { Logger = _logger, IsPaused = IsPaused };
         AppPresent = d => EnsureBound()?.HasApp(d) == true;
     }
 
@@ -127,6 +127,18 @@ public sealed class OverlayClientHost : IHostedService
         }
 
         await _sessions.SendPlaystateCommand(null, sessionId, req, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>Whether the session is paused on that item; null when it is gone or plays something else (or nothing yet).</summary>
+    private bool? IsPaused(string sessionId, Guid itemId)
+    {
+        var s = _sessions.Sessions.FirstOrDefault(x => string.Equals(x.Id, sessionId, StringComparison.Ordinal));
+        if (s?.NowPlayingItem is not { } item || item.Id != itemId)
+        {
+            return null;
+        }
+
+        return s.PlayState?.IsPaused;
     }
 
     private static string? Str(JsonElement e, string name) =>

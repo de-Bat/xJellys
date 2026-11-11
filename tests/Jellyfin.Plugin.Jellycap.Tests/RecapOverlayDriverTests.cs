@@ -300,4 +300,117 @@ public class RecapOverlayDriverTests
 
         Assert.Empty(_log);
     }
+
+    // A toggling player (Jellyfin for Android TV): Pause/Unpause flip play/pause and are dropped while buffering.
+    private bool? _paused;
+
+    private void UseProbe() => _driver.IsPaused = (session, item) => _paused;
+
+    [Fact]
+    public async Task Probe_PauseDroppedWhileLoading_IsSentAgainUntilPaused()
+    {
+        UseProbe();
+        _paused = null; // the episode is still loading
+        await _driver.OnReady(Device, PauseRecap());
+        Assert.Single(_log, "Pause@s1");
+
+        _paused = false; // playing: the first Pause was dropped
+        _clock.Advance(RecapOverlayDriver.PlayStateCheck);
+        Assert.Equal(2, _log.Count(l => l == "Pause@s1"));
+
+        _paused = true;
+        _clock.Advance(RecapOverlayDriver.PlayStateCheck);
+        _clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.Equal(2, _log.Count(l => l == "Pause@s1"));
+    }
+
+    [Fact]
+    public async Task Probe_PauseTrigger_StopsPauseRetries()
+    {
+        UseProbe();
+        _paused = false;
+        await _driver.OnReady(Device, PauseRecap());
+        await _driver.OnTrigger(Device, "pause", null, 0);
+        _paused = null;
+
+        _clock.Advance(TimeSpan.FromSeconds(8));
+
+        Assert.Single(_log, "Pause@s1");
+    }
+
+    [Fact]
+    public async Task Probe_PauseRetries_AreCapped()
+    {
+        UseProbe();
+        _paused = false;
+        await _driver.OnReady(Device, PauseRecap());
+
+        for (var i = 0; i < 20; i++)
+        {
+            _clock.Advance(RecapOverlayDriver.PlayStateCheck);
+        }
+
+        Assert.Equal(RecapOverlayDriver.MaxPlayStateTries, _log.Count(l => l == "Pause@s1"));
+    }
+
+    [Fact]
+    public async Task Probe_AlreadyPaused_SendsNoPause()
+    {
+        UseProbe();
+        _paused = true;
+
+        await _driver.OnReady(Device, PauseRecap());
+
+        Assert.DoesNotContain("Pause@s1", _log);
+    }
+
+    [Fact]
+    public async Task Probe_RecapDoneWhilePlaying_SendsNoUnpause()
+    {
+        // the bug: Unpause on a playing episode toggled it into pause, and that pause opened the cast panel
+        UseProbe();
+        _paused = false;
+        await _driver.OnReady(Device, PauseRecap());
+        _log.Clear();
+
+        await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
+        _clock.Advance(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(new[] { "Seek:12345@s1", "close:recap@d1" }, _log);
+    }
+
+    [Fact]
+    public async Task Probe_UnpauseDroppedDuringSeek_IsSentAgainUntilPlaying()
+    {
+        UseProbe();
+        _paused = true;
+        await _driver.OnReady(Device, PauseRecap());
+        _log.Clear();
+
+        await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
+        Assert.Equal(new[] { "Seek:12345@s1", "Unpause@s1", "close:recap@d1" }, _log);
+
+        _clock.Advance(RecapOverlayDriver.PlayStateCheck); // still paused: the seek was buffering
+        Assert.Equal(2, _log.Count(l => l == "Unpause@s1"));
+
+        _paused = false;
+        _clock.Advance(RecapOverlayDriver.PlayStateCheck);
+        _clock.Advance(TimeSpan.FromSeconds(20));
+        Assert.Equal(2, _log.Count(l => l == "Unpause@s1"));
+    }
+
+    [Fact]
+    public async Task Probe_UserPausesAfterRecap_UnpauseRetriesStop()
+    {
+        UseProbe();
+        _paused = true;
+        await _driver.OnReady(Device, PauseRecap());
+        await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
+        _log.Clear();
+
+        await _driver.OnTrigger(Device, "pause", null, 0);
+        _clock.Advance(TimeSpan.FromSeconds(20));
+
+        Assert.DoesNotContain("Unpause@s1", _log);
+    }
 }
