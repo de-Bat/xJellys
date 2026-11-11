@@ -215,6 +215,14 @@
     "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.JellySubSync/JellySubSync.png",
     "versions": [
       {
+        "version": "1.1.0.0",
+        "changelog": "1.1.0.0: The sync box now works with the JellyTvOverlay app (JellyXR TV is still supported this release). 1.0.2.0: Fix HTTP 500 on Jellyfin 10.11 and 12.x (user and version APIs changed); jellysubsync.log is written from startup and logs every error. 1.0.1.0: Plugin logo. 1.0.0.0: First release. Shifts text subtitles (SRT, ASS/SSA, WebVTT, and embedded text tracks) for the JellyXR TV app sync box (app 1.2.0 or newer). Opt-in: turn it on for all titles, or only for chosen libraries, shows and movies.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellySubSync-v1.1.0.0/Jellyfin.Plugin.JellySubSync_1.1.0.0.zip",
+        "checksum": "04D76A10B14CEC3EC7F9B0545AE8C998",
+        "timestamp": "2026-11-11T06:23:53Z"
+      },
+      {
         "version": "1.0.2.0",
         "changelog": "1.0.2.0: Fix HTTP 500 on Jellyfin 10.11 and 12.x (user and version APIs changed); jellysubsync.log is written from startup and logs every error. 1.0.1.0: Plugin logo. 1.0.0.0: First release. Shifts text subtitles (SRT, ASS/SSA, WebVTT, and embedded text tracks) for the JellyXR TV app sync box (app 1.2.0 or newer). Opt-in: turn it on for all titles, or only for chosen libraries, shows and movies.",
         "targetAbi": "10.9.0.0",
