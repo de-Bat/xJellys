@@ -10,7 +10,8 @@ namespace Jellyfin.Plugin.Jellycap.Overlay;
 /// <c>Seek:&lt;ticks&gt;</c>, and layouts through <see cref="ShowLayout"/> / <see cref="CloseLayout"/>.
 /// <list type="bullet">
 /// <item>Pause mode: Show the sequence, then Pause (so the pause is suppressed for other clients). recapDone or the
-/// fallback timer (total + 30 s) → close, seek back to ResumeTicks, Unpause. The user pressing play (resume) → close,
+/// fallback timer (total + 30 s) → seek back to ResumeTicks, Unpause, then close (the layout's suppressTriggers
+/// cover the Unpause). The user pressing play (resume) → close,
 /// no seek. Host rejects the Show → nothing is paused; the caller falls back.</item>
 /// <item>Timed mode: on the recap video's itemStart, a Show/Close per card at its At / At+Seconds offset from the
 /// trigger position; pause drops the schedule, resume and seek re-sync it from the trigger position.</item>
@@ -248,15 +249,17 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
             held.Fallback?.Dispose();
         }
 
-        if (close)
-        {
-            CloseLayout(deviceId, RecapLayoutBuilder.PauseLayoutId);
-        }
-
+        // Seek + Unpause first: the recap layout's suppressTriggers must still cover our own Unpause (resume), or it
+        // would reach other clients (e.g. JellyXR seeing pause-play-pause). Close only after it went out.
         if (resume)
         {
             await Send(held.Recap.SessionId, Seek(held.Recap.ResumeTicks)).ConfigureAwait(false);
             await Send(held.Recap.SessionId, Unpause).ConfigureAwait(false);
+        }
+
+        if (close)
+        {
+            CloseLayout(deviceId, RecapLayoutBuilder.PauseLayoutId);
         }
     }
 

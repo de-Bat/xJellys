@@ -101,8 +101,23 @@ public class RecapOverlayDriverTests
 
         await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
 
-        Assert.Equal(new[] { "close:recap@d1", "Seek:12345@s1", "Unpause@s1" }, _log);
+        Assert.Equal(new[] { "Seek:12345@s1", "Unpause@s1", "close:recap@d1" }, _log);
         Assert.False(_driver.IsHeld(Device));
+    }
+
+    [Fact]
+    public async Task RecapDone_ClosesOnlyAfterUnpause()
+    {
+        // R19: the recap layout (suppressTriggers pause/resume/doublePause) stays up until our own Unpause went out,
+        // so that Unpause cannot reach JellyXR as a pause-play-pause pattern
+        await _driver.OnReady(Device, PauseRecap());
+        _log.Clear();
+
+        await _driver.OnClosed(Device, "Jellycap/recap", "finished");
+
+        var unpause = _log.IndexOf("Unpause@s1");
+        var close = _log.IndexOf("close:recap@d1");
+        Assert.True(unpause >= 0 && close > unpause, string.Join(", ", _log));
     }
 
     [Fact]
@@ -184,7 +199,7 @@ public class RecapOverlayDriverTests
         Assert.Empty(_log);
 
         _clock.Advance(TimeSpan.FromSeconds(1.5));
-        Assert.Equal(new[] { "close:recap@d1", "Seek:12345@s1", "Unpause@s1" }, _log);
+        Assert.Equal(new[] { "Seek:12345@s1", "Unpause@s1", "close:recap@d1" }, _log);
         Assert.False(_driver.IsHeld(Device));
     }
 
