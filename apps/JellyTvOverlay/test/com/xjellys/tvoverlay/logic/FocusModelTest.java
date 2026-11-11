@@ -171,6 +171,33 @@ public class FocusModelTest {
     }
 
     @Test
+    public void back_bound_stillCloses() throws Exception {
+        // R15: BACK always gives the remote back; a back binding only adds an action
+        Layout l = lay("interactive", "{\"back\":{\"op\":\"action\",\"action\":\"bye\"}}", "[" + btn("a", "x") + "]");
+        FocusModel f = new FocusModel(l, rects("a", r(0, 0, 10, 10)));
+        FocusModel.Result res = f.onKey("back");
+        assertEquals(FocusModel.Kind.BACK, res.kind);
+        assertEquals("bye", res.action);
+    }
+
+    @Test
+    public void back_boundStep_stillClosesWithoutAction() throws Exception {
+        Layout l = lay("interactive", "{\"back\":{\"op\":\"step\",\"target\":\"v\",\"by\":1}}", "[" + btn("a", "x")
+                + ",{\"type\":\"value\",\"id\":\"v\",\"value\":0}]");
+        FocusModel f = new FocusModel(l, rects("a", r(0, 0, 10, 10)));
+        FocusModel.Result res = f.onKey("back");
+        assertEquals(FocusModel.Kind.BACK, res.kind);
+        assertNull(res.action);
+    }
+
+    @Test
+    public void back_unbound_hasNoAction() throws Exception {
+        Layout l = lay("interactive", null, "[" + btn("a", "x") + "]");
+        FocusModel f = new FocusModel(l, rects("a", r(0, 0, 10, 10)));
+        assertNull(f.onKey("back").action);
+    }
+
+    @Test
     public void unknownKey_isNone() throws Exception {
         Layout l = lay("interactive", null, "[" + btn("a", "x") + "]");
         FocusModel f = new FocusModel(l, rects("a", r(0, 0, 10, 10)));

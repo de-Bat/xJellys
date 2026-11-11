@@ -253,6 +253,8 @@ public final class OverlayWindow {
                 listener.onAction(layout, r.action, r.elementId, values.snapshot());
                 break;
             case BACK:
+                // R15: BACK always gives the remote back; a bound action is sent first
+                if (r.action != null) listener.onAction(layout, r.action, r.elementId, values.snapshot());
                 finish("back");
                 break;
             case PASSTHROUGH:

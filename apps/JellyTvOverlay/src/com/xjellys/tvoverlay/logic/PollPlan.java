@@ -28,9 +28,12 @@ public final class PollPlan {
         public final Set<String> keep;
         /** The layout parsed and canonicalized on the thread that built the plan (SHOW only). */
         public final PreparedShow prepared;
+        /** SHOW only: part of the snapshot that follows a reset (same seq as the reset). */
+        public final boolean inSnapshot;
 
-        Step(Kind kind, String id, JSONObject layout, Set<String> keep) {
+        Step(Kind kind, String id, JSONObject layout, Set<String> keep, boolean inSnapshot) {
             this.kind = kind;
+            this.inSnapshot = inSnapshot;
             this.id = id;
             this.layout = layout;
             this.keep = keep;
@@ -76,6 +79,7 @@ public final class PollPlan {
             ids.add(id);
         }
 
+        int snapshotEnd = -1; // index of the last show in the current snapshot
         for (int i = 0; i < valid.size(); i++) {
             JSONObject o = valid.get(i);
             String op = o.optString("op");
@@ -86,12 +90,13 @@ public final class PollPlan {
                     JSONObject n = valid.get(j);
                     if (!"show".equals(n.optString("op")) || n.optLong("seq", Long.MIN_VALUE) != snap) break;
                     keep.add(ids.get(j));
+                    snapshotEnd = j;
                 }
-                steps.add(new Step(Kind.RESET, null, null, keep));
+                steps.add(new Step(Kind.RESET, null, null, keep, false));
             } else if ("show".equals(op)) {
-                steps.add(new Step(Kind.SHOW, ids.get(i), o.optJSONObject("layout"), null));
+                steps.add(new Step(Kind.SHOW, ids.get(i), o.optJSONObject("layout"), null, i <= snapshotEnd));
             } else {
-                steps.add(new Step(Kind.CLOSE, ids.get(i), null, null));
+                steps.add(new Step(Kind.CLOSE, ids.get(i), null, null, false));
             }
         }
         return new PollPlan(seq, steps);

@@ -17,6 +17,7 @@ import java.net.URLEncoder;
 import java.util.concurrent.atomic.AtomicReference;
 import java.nio.charset.StandardCharsets;
 
+import com.xjellys.tvoverlay.logic.BodyLimit;
 import com.xjellys.tvoverlay.model.ServerUrl;
 
 /** Minimal Jellyfin REST client. Every call blocks: run it off the main thread. */
@@ -113,8 +114,14 @@ public final class Api {
     /** handle (may be null) holds the open connection, so another thread can disconnect() a blocked read. */
     private byte[] call(String method, String path, String jsonBody, int readMs,
                         AtomicReference<HttpURLConnection> handle) throws IOException {
+        return call(method, path, jsonBody, readMs, handle, 0);
+    }
+
+    /** maxBytes > 0: a larger body fails with an IOException (a network error to the caller). */
+    private byte[] call(String method, String path, String jsonBody, int readMs,
+                        AtomicReference<HttpURLConnection> handle, int maxBytes) throws IOException {
         try {
-            return callOnce(method, path, jsonBody, readMs, handle);
+            return callOnce(method, path, jsonBody, readMs, handle, maxBytes);
         } catch (HttpError e) {
             throw e;
         } catch (IOException e) {
@@ -124,12 +131,12 @@ public final class Api {
                 || (e instanceof java.net.SocketException && !(e instanceof java.net.ConnectException));
             if (!"GET".equals(method) || !stale) throw e;
             if (handle != null && handle.get() == ABORTED) throw e;
-            return callOnce(method, path, jsonBody, readMs, handle);
+            return callOnce(method, path, jsonBody, readMs, handle, maxBytes);
         }
     }
 
     private byte[] callOnce(String method, String path, String jsonBody, int readMs,
-                            AtomicReference<HttpURLConnection> handle) throws IOException {
+                            AtomicReference<HttpURLConnection> handle, int maxBytes) throws IOException {
         HttpURLConnection c = open(method, path, readMs);
         if (handle != null && !handle.compareAndSet(null, c)) {
             // aborted before the request went out
@@ -163,7 +170,7 @@ public final class Api {
                 throw new HttpError(code, msg.trim());
             }
             if (code == 204) return new byte[0];
-            return read(c.getInputStream());
+            return maxBytes > 0 ? BodyLimit.read(c.getInputStream(), maxBytes) : read(c.getInputStream());
         } finally {
             if (handle != null) handle.compareAndSet(c, null);
             c.disconnect();
@@ -274,7 +281,8 @@ public final class Api {
 
     /** As poll(); {@link #abort(AtomicReference)} on the handle from another thread ends a blocked poll at once. */
     JSONObject poll(String deviceId, long since, AtomicReference<HttpURLConnection> handle) throws Exception {
-        String t = new String(call("GET", "/JellyTvOverlay/Poll?deviceId=" + enc(deviceId) + "&since=" + since, null, 35000, handle),
+        String t = new String(call("GET", "/JellyTvOverlay/Poll?deviceId=" + enc(deviceId) + "&since=" + since, null, 35000, handle,
+            BodyLimit.POLL_MAX_BYTES),
             StandardCharsets.UTF_8);
         return t.trim().isEmpty() ? new JSONObject().put("seq", since).put("ops", new JSONArray()) : new JSONObject(t);
     }

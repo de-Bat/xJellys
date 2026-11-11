@@ -24,10 +24,13 @@ import org.json.JSONObject;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.xjellys.tvoverlay.logic.LocalCloses;
 import com.xjellys.tvoverlay.logic.OverlayEvents;
 import com.xjellys.tvoverlay.logic.PlayPosition;
 import com.xjellys.tvoverlay.logic.PollPlan;
@@ -59,7 +62,9 @@ public class OverlayService extends Service {
     private final Handler main = new Handler(Looper.getMainLooper());
     private HandlerThread followThread;
     private Handler follow;
-    private ExecutorService events, control;
+    /** Events go out in order; a failed {@code closed} is retried later on the same thread (never sleeps there). */
+    private ScheduledExecutorService events;
+    private ExecutorService control;
     private Prefs prefs;
     private Api api;
 
@@ -84,6 +89,8 @@ public class OverlayService extends Service {
     private OverlayManager overlays;
     private ImageCache images;
     private final PreloadCache preloads = new PreloadCache(32);
+    /** Ids this app closed itself: a snapshot does not bring them back while their closed event may be lost. */
+    private final LocalCloses localCloses = new LocalCloses();
 
     static void start(Context ctx) {
         ctx.startForegroundService(new Intent(ctx, OverlayService.class));
@@ -104,7 +111,7 @@ public class OverlayService extends Service {
         followThread = new HandlerThread("jellytvoverlay-follow");
         followThread.start();
         follow = new Handler(followThread.getLooper());
-        events = Executors.newSingleThreadExecutor(named("jellytvoverlay-events"));
+        events = Executors.newSingleThreadScheduledExecutor(named("jellytvoverlay-events"));
         control = Executors.newSingleThreadExecutor(named("jellytvoverlay-control"));
         getSystemService(NotificationManager.class).createNotificationChannel(
             new NotificationChannel(CHANNEL, "JellyTvOverlay", NotificationManager.IMPORTANCE_LOW));
@@ -189,7 +196,7 @@ public class OverlayService extends Service {
         follow(dev);
         sample(s); // after follow(): a device switch clears the old position
         if (dev == null) {
-            setStatus("Waiting for Jellyfin on this box to play something");
+            setStatus("Waiting for Jellyfin on this box (not found? pick it with Watch)");
             return;
         }
 
@@ -262,6 +269,7 @@ public class OverlayService extends Service {
                 if (destroyed) return;
                 overlays.closeAll();
                 preloads.clear();
+                localCloses.onReset(null, 0);
             }
         });
         String dev = device;
@@ -366,16 +374,20 @@ public class OverlayService extends Service {
     /** Main thread: one Poll response, in order. Stale plans (device changed meanwhile) are dropped. */
     private void apply(PollPlan plan, int g) {
         if (destroyed || gen.get() != g) return;
+        long now = SystemClock.elapsedRealtime();
         for (PollPlan.Step st : plan.steps) {
             switch (st.kind) {
                 case RESET:
+                    localCloses.onReset(st.keep, now);
                     overlays.closeAllExcept(st.keep);
                     break;
                 case CLOSE:
+                    localCloses.hostClosed(st.id);
                     overlays.close(st.id);
                     break;
                 case SHOW:
-                    show(st.prepared);
+                    // a snapshot still listing a window this app closed: its closed event has not landed yet
+                    if (localCloses.allowShow(st.id, st.inSnapshot, now)) show(st.prepared);
                     break;
                 default:
                     break;
@@ -410,8 +422,9 @@ public class OverlayService extends Service {
         }
 
         @Override public void onClosed(Layout l, String reason) {
+            localCloses.closed(l.id, SystemClock.elapsedRealtime());
             String dev = device;
-            if (dev != null) send(OverlayEvents.closed(dev, l.id, reason));
+            if (dev != null) sendClosed(OverlayEvents.closed(dev, l.id, reason), 0);
         }
 
         @Override public void onPassthrough(final String key) {
@@ -434,6 +447,39 @@ public class OverlayService extends Service {
                 }
             }
         });
+    }
+
+    /**
+     * A {@code closed} event, retried on network and server errors after 1, 2 and 4 s (scheduled on the events
+     * thread, so nothing blocks). A lost one would let the host's next snapshot reopen the window.
+     */
+    private void sendClosed(final JSONObject body, final int attempt) {
+        Runnable r = new Runnable() {
+            @Override public void run() {
+                int code;
+                try {
+                    api.event(body);
+                    return;
+                } catch (Api.HttpError e) {
+                    code = e.code;
+                    Log.w(TAG, "closed not taken: HTTP " + e.code);
+                } catch (Exception e) {
+                    code = 0;
+                    Log.w(TAG, "closed failed: " + e.getClass().getSimpleName());
+                }
+                long d = LocalCloses.retryable(code) ? LocalCloses.retryDelayMs(attempt) : -1;
+                if (d < 0 || destroyed) return;
+                try {
+                    events.schedule(new Runnable() {
+                        @Override public void run() { sendClosed(body, attempt + 1); }
+                    }, d, TimeUnit.MILLISECONDS);
+                } catch (RejectedExecutionException ignored) {
+                    // service stopping
+                }
+            }
+        };
+        if (attempt == 0) run(events, r);
+        else r.run();
     }
 
     /** Media keys a passthrough layout hands on to the player. */

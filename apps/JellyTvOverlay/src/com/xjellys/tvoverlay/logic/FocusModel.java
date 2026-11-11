@@ -15,6 +15,10 @@ import com.xjellys.tvoverlay.model.Node;
  * returned as {@code Kind.STEPPED} with {@code target} and {@code by}; the caller applies them with
  * {@link ValueState#step(String, double)}.
  *
+ * <p>BACK: always {@code Kind.BACK} (the window closes and the remote goes back), bound or not. An
+ * {@code action} binding on back is carried in {@code action} (send it, then close); a step binding on
+ * back is ignored.
+ *
  * <p>Key order: a key binding wins (even for {@code play} in passthrough). Otherwise arrows move
  * focus to the nearest focusable in that direction, judged by the screen rects (not document order,
  * so RTL rows work). Candidates must have their centre beyond the focused centre on the key's axis;
@@ -114,6 +118,11 @@ public final class FocusModel {
         if (key == null) return NONE;
         String fid = focused();
         KeyBinding b = layout.keys.get(key);
+        if ("back".equals(key)) {
+            // BACK always closes the window and gives the remote back; an action binding only rides along
+            String act = b != null && "action".equals(b.op) ? b.action : null;
+            return new Result(Kind.BACK, act, fid, null, 0);
+        }
         if (b != null) {
             if ("step".equals(b.op)) return new Result(Kind.STEPPED, null, fid, b.target, b.by);
             if ("action".equals(b.op)) return new Result(Kind.ACTION, b.action, fid, null, 0);
@@ -135,7 +144,6 @@ public final class FocusModel {
             if (focused != null && focused.action != null) return new Result(Kind.ACTION, focused.action, fid, null, 0);
             return NONE;
         }
-        if ("back".equals(key)) return new Result(Kind.BACK, null, fid, null, 0);
         if ("play".equals(key) && layout.passthrough()) return new Result(Kind.PASSTHROUGH, null, fid, null, 0);
         return NONE;
     }

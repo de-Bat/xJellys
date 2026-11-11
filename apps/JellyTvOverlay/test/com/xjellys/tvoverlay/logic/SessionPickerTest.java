@@ -31,11 +31,18 @@ public class SessionPickerTest {
     }
 
     @Test
-    public void fallbacks_anyPlayingTv_thenAnyVideo() {
+    public void noFallback_toOtherBoxesOrVideoSessions() {
+        // R17: never follow another box's player; a box whose name does not match needs one Watch pick
         JSONArray l = new JSONArray().put(s("web", "PC", "Jellyfin Web", "Episode")).put(s("tv2", "Bedroom", "Android TV", "Movie"));
-        assertEquals("tv2", SessionPicker.pick(l, "me", "", "Living Room").getString("DeviceId"));
-        JSONArray l2 = new JSONArray().put(s("web", "PC", "Jellyfin Web", "Audio")).put(s("web2", "PC2", "Jellyfin Web", "Episode"));
-        assertEquals("web2", SessionPicker.pick(l2, "me", "", "Living Room").getString("DeviceId"));
+        assertNull(SessionPicker.pick(l, "me", "", "Living Room"));
+        assertNull(SessionPicker.pick(l, "me", null, "Living Room"));
         assertNull(SessionPicker.pick(new JSONArray(), "me", "", "x"));
+    }
+
+    @Test
+    public void sameBox_prefersThePlayingSession() {
+        JSONArray l = new JSONArray().put(s("idle", "Living Room", "Android TV", null))
+            .put(s("busy", "Living Room", "Jellyfin Android TV", "Movie"));
+        assertEquals("busy", SessionPicker.pick(l, "me", "", "Living Room").getString("DeviceId"));
     }
 }

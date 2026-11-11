@@ -93,4 +93,24 @@ public class PollPlanTest {
         assertEquals(5, p.seq);
         assertTrue(p.steps.isEmpty());
     }
+
+    @Test
+    public void show_withNullLayout_skipped() {
+        // R20: the host nulls superseded show payloads in its op log; such ops are ignored
+        PollPlan p = plan("{\"seq\":6,\"ops\":[{\"seq\":5,\"op\":\"show\",\"layoutId\":\"a/x\",\"layout\":null},"
+            + show(6, "a/x") + "]}", 4);
+        assertEquals(1, p.steps.size());
+        assertEquals(6, p.seq);
+        assertEquals("a/x", p.steps.get(0).layout.getString("id"));
+    }
+
+    @Test
+    public void snapshotShows_areMarked() {
+        PollPlan p = plan("{\"seq\":8,\"ops\":[{\"seq\":7,\"op\":\"reset\",\"layoutId\":\"\"}," + show(7, "a/x") + ","
+            + show(8, "a/z") + "]}", 0);
+        assertTrue(p.steps.get(1).inSnapshot);
+        assertFalse(p.steps.get(2).inSnapshot);
+        PollPlan q = plan("{\"seq\":5,\"ops\":[" + show(5, "a/x") + "]}", 4);
+        assertFalse(q.steps.get(0).inSnapshot);
+    }
 }
