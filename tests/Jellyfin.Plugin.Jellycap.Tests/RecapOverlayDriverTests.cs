@@ -94,14 +94,14 @@ public class RecapOverlayDriverTests
     }
 
     [Fact]
-    public async Task RecapDone_SeeksToResumeThenUnpauses()
+    public async Task RecapDone_UnpausesThenSeeksToResume()
     {
         await _driver.OnReady(Device, PauseRecap());
         _log.Clear();
 
         await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
 
-        Assert.Equal(new[] { "Seek:12345@s1", "Unpause@s1", "close:recap@d1" }, _log);
+        Assert.Equal(new[] { "Unpause@s1", "Seek:12345@s1", "close:recap@d1" }, _log);
         Assert.False(_driver.IsHeld(Device));
     }
 
@@ -199,7 +199,7 @@ public class RecapOverlayDriverTests
         Assert.Empty(_log);
 
         _clock.Advance(TimeSpan.FromSeconds(1.5));
-        Assert.Equal(new[] { "Seek:12345@s1", "Unpause@s1", "close:recap@d1" }, _log);
+        Assert.Equal(new[] { "Unpause@s1", "Seek:12345@s1", "close:recap@d1" }, _log);
         Assert.False(_driver.IsHeld(Device));
     }
 
@@ -380,7 +380,7 @@ public class RecapOverlayDriverTests
     }
 
     [Fact]
-    public async Task Probe_UnpauseDroppedDuringSeek_IsSentAgainUntilPlaying()
+    public async Task Probe_UnpauseDropped_IsSentAgainUntilPlaying()
     {
         UseProbe();
         _paused = true;
@@ -388,9 +388,9 @@ public class RecapOverlayDriverTests
         _log.Clear();
 
         await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
-        Assert.Equal(new[] { "Seek:12345@s1", "Unpause@s1", "close:recap@d1" }, _log);
+        Assert.Equal(new[] { "Unpause@s1", "Seek:12345@s1", "close:recap@d1" }, _log);
 
-        _clock.Advance(RecapOverlayDriver.PlayStateCheck); // still paused: the seek was buffering
+        _clock.Advance(RecapOverlayDriver.PlayStateCheck); // still paused: the Unpause was dropped
         Assert.Equal(2, _log.Count(l => l == "Unpause@s1"));
 
         _paused = false;
@@ -412,5 +412,37 @@ public class RecapOverlayDriverTests
         _clock.Advance(TimeSpan.FromSeconds(20));
 
         Assert.DoesNotContain("Unpause@s1", _log);
+    }
+
+    [Fact]
+    public async Task Probe_UnknownState_NoBlindPauseRetry()
+    {
+        // a lagging report (null) may hide a pause that already took; another toggle would undo it
+        UseProbe();
+        _paused = false;
+        await _driver.OnReady(Device, PauseRecap());
+        _paused = null;
+
+        for (var i = 0; i < 10; i++)
+        {
+            _clock.Advance(RecapOverlayDriver.PlayStateCheck);
+        }
+
+        Assert.Single(_log, "Pause@s1");
+    }
+
+    [Fact]
+    public async Task Probe_ResumeTrigger_StopsUnpauseRetries()
+    {
+        // the first Unpause took but the reported state still lags as paused: a retry would toggle it back into pause
+        UseProbe();
+        _paused = true;
+        await _driver.OnReady(Device, PauseRecap());
+        await _driver.OnAction(Device, "Jellycap/recap", "recapDone");
+        await _driver.OnTrigger(Device, "resume", null, 0);
+
+        _clock.Advance(TimeSpan.FromSeconds(20));
+
+        Assert.Single(_log, "Unpause@s1");
     }
 }

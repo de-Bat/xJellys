@@ -10,7 +10,7 @@ namespace Jellyfin.Plugin.Jellycap.Overlay;
 /// <c>Seek:&lt;ticks&gt;</c>, and layouts through <see cref="ShowLayout"/> / <see cref="CloseLayout"/>.
 /// <list type="bullet">
 /// <item>Pause mode: Show the sequence, then Pause (so the pause is suppressed for other clients). recapDone or the
-/// fallback timer (total + 30 s) → seek back to ResumeTicks, Unpause, then close (the layout's suppressTriggers
+/// fallback timer (total + 30 s) → Unpause (only while paused), seek back to ResumeTicks, then close (the layout's suppressTriggers
 /// cover the Unpause). The user pressing play (resume) → close,
 /// no seek. Host rejects the Show → nothing is paused; the caller falls back.</item>
 /// <item>Timed mode: on the recap video's itemStart, a Show/Close per card at its At / At+Seconds offset from the
@@ -32,6 +32,10 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
     public const int MaxPlayStateTries = 6;
 
     private readonly object _gate = new();
+
+    // Playstate sends are toggles on some players: "check state, then send" must not interleave between a retry
+    // timer, Finish (Seek + Unpause) and a new hold's Pause, or a stale command lands after a newer one.
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly Dictionary<string, Held> _held = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (OverlayRecap Recap, DateTimeOffset At)> _timedPending = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Timed> _timed = new(StringComparer.Ordinal);
@@ -93,6 +97,7 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
             if (_held.Remove(deviceId, out var old))
             {
                 old.Fallback?.Dispose();
+                old.PauseCheck?.Dispose();
             }
 
             // show first: the pause that follows must reach the host while this layout suppresses it
@@ -114,8 +119,25 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
         return true;
     }
 
-    /// <summary>Sends Pause unless the episode is known to be paused; with a probe, re-checks while the hold lasts.</summary>
+    /// <summary>
+    /// Sends Pause unless the episode is known to be paused; with a probe, re-checks while the hold lasts. A retry
+    /// goes out only when the probe says playing (false): unknown (null) may mean a lagging report of a pause
+    /// that already took, and another toggle would undo it.
+    /// </summary>
     private async Task EnsurePaused(string deviceId, Held held)
+    {
+        await _sendLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await EnsurePausedLocked(deviceId, held).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
+    private async Task EnsurePausedLocked(string deviceId, Held held)
     {
         int tries;
         lock (_gate)
@@ -125,7 +147,8 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
                 return;
             }
 
-            if (Probe(held.Recap) == true)
+            var state = Probe(held.Recap);
+            if (state == true)
             {
                 held.Paused = true;
                 return;
@@ -133,15 +156,22 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
 
             if (held.PauseTries >= MaxPlayStateTries)
             {
-                Logger?.LogWarning("The episode on {Device} did not pause after {Tries} Pause commands", deviceId, MaxPlayStateTries);
+                Logger?.LogWarning("The episode on {Device} did not pause after {Tries} checks", deviceId, MaxPlayStateTries);
                 return;
             }
 
+            // the first Pause always goes out; a retry only while the probe says playing
+            var send = held.PauseTries == 0 || state == false;
             tries = ++held.PauseTries;
             if (IsPaused is not null)
             {
                 held.PauseCheck?.Dispose();
                 held.PauseCheck = clock.CreateTimer(_ => _ = EnsurePaused(deviceId, held), null, PlayStateCheck, Timeout.InfiniteTimeSpan);
+            }
+
+            if (!send)
+            {
+                return;
             }
         }
 
@@ -156,6 +186,19 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
     /// <summary>Sends Unpause while the episode is paused on the recap's item; with a probe, re-checks (a seek may buffer).</summary>
     private async Task EnsurePlaying(string deviceId, Resume resume)
     {
+        await _sendLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await EnsurePlayingLocked(deviceId, resume).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
+    private async Task EnsurePlayingLocked(string deviceId, Resume resume)
+    {
         int tries;
         lock (_gate)
         {
@@ -164,7 +207,7 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
                 return;
             }
 
-            // no probe answer: one Unpause, only when the episode was seen paused
+            // no probe answer: one Unpause (the first), only when the episode was seen paused; never a blind retry
             var paused = Probe(resume.Recap) ?? (resume.Tries == 0 && resume.PausedSeen);
             resume.Check?.Dispose();
             if (!paused || resume.Tries >= MaxPlayStateTries)
@@ -286,9 +329,9 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
 
         lock (_gate)
         {
-            if (trigger is "stop" or "itemStart" or "pause" or "doublePause")
+            if (trigger is "stop" or "itemStart" or "pause" or "doublePause" or "resume")
             {
-                // the episode moved on, or the user paused it: stop pushing Unpause
+                // playing again (done), the episode moved on, or the user paused it: stop pushing Unpause
                 DropResumeLocked(deviceId);
             }
 
@@ -366,6 +409,19 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
     /// <summary>Ends the hold once. <paramref name="expected"/> null = whatever hold the device has.</summary>
     private async Task Finish(string deviceId, Held? expected, bool resume, bool close = true)
     {
+        await _sendLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await FinishLocked(deviceId, expected, resume, close).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
+    private async Task FinishLocked(string deviceId, Held? expected, bool resume, bool close)
+    {
         Held held;
         lock (_gate)
         {
@@ -380,12 +436,14 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
             held.PauseCheck?.Dispose();
         }
 
-        // Seek + Unpause first: the recap layout's suppressTriggers must still cover our own Unpause (resume), or it
-        // would reach other clients (e.g. JellyXR seeing pause-play-pause). Close only after it went out.
-        // Unpause only while paused: on a toggling player it would pause a playing episode.
+        // Unpause + Seek first: the recap layout's suppressTriggers must still cover our own Unpause (resume), or it
+        // would reach other clients (e.g. JellyXR seeing pause-play-pause). Close only after they went out.
+        // Unpause only while paused: on a toggling player it would pause a playing episode. Unpause before the
+        // seek: Jellyfin for Android TV restores the paused state when a seek started while paused completes, which
+        // undid an Unpause sent right after the Seek. Only this first Unpause is covered by the layout's
+        // suppressTriggers; a retry goes out after the close.
         if (resume)
         {
-            await Send(held.Recap.SessionId, Seek(held.Recap.ResumeTicks)).ConfigureAwait(false);
             var r = new Resume(held.Recap) { PausedSeen = held.Paused || IsPaused is null };
             lock (_gate)
             {
@@ -393,7 +451,8 @@ public sealed class RecapOverlayDriver(Func<string, string, Task> playstate, Tim
                 _resuming[deviceId] = r;
             }
 
-            await EnsurePlaying(deviceId, r).ConfigureAwait(false);
+            await EnsurePlayingLocked(deviceId, r).ConfigureAwait(false);
+            await Send(held.Recap.SessionId, Seek(held.Recap.ResumeTicks)).ConfigureAwait(false);
         }
 
         if (close)

@@ -150,7 +150,8 @@ public final class Renderer {
             v = timed(n, "pages".equals(t), ibw, ibh, scroller);
         } else if ("text".equals(t)) {
             v = text(n);
-            ScrollView sv = n.scroll() && n.id != null ? refs.scrollTexts.get(n.id) : null;
+            ScrollView sv = n.scroll() && v instanceof ViewGroup && ((ViewGroup) v).getChildAt(0) instanceof ScrollView
+                ? (ScrollView) ((ViewGroup) v).getChildAt(0) : null;
             if (sv != null && h < 0 && n.maxLines() > 0) {
                 // a scroll text shows maxLines lines; the rest scrolls inside the box
                 lh = n.maxLines() * ((TextView) sv.getChildAt(0)).getLineHeight() + 2 * pad;
