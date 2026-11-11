@@ -10,6 +10,9 @@ public static class CastLayoutBuilder
 {
     public const string LayoutId = "cast";
 
+    /// <summary>Layout focus modes the panel is built with.</summary>
+    public const string FocusPassive = "passive", FocusInteractive = "interactive", FocusPassthrough = "interactive+passthrough";
+
     // CastPanel sizes in dp, and the 540 dp screen height they are measured against (1080p at density 2).
     private const double ScreenDp = 540;
     private const int Big = 64, Small = 44, Section = 34, Gap = 10;
@@ -21,8 +24,17 @@ public static class CastLayoutBuilder
     /// <summary>One page: its title and its entries (a section label string or a card).</summary>
     public sealed record Page(string Title, IReadOnlyList<object> Entries);
 
-    public static JsonObject Build(CardSet set, bool interactive, int pageMs = 8000)
+    public static JsonObject Build(CardSet set, bool interactive, int pageMs = 8000) =>
+        Build(set, interactive ? FocusInteractive : FocusPassive, pageMs);
+
+    /// <summary>
+    /// focus: <see cref="FocusPassive"/> (auto-flipping pages), <see cref="FocusInteractive"/> (rows selectable,
+    /// pages flip with left/right) or <see cref="FocusPassthrough"/> (rows selectable, play and seek keys stay with
+    /// the player; no key paging).
+    /// </summary>
+    public static JsonObject Build(CardSet set, string focus, int pageMs = 8000)
     {
+        var interactive = focus is FocusInteractive or FocusPassthrough;
         var pages = Paginate(set);
         var split = set.Cards.Any(c => c.OnScreen) && set.Cards.Any(c => !c.OnScreen);
         var pageNodes = new JsonArray();
@@ -40,7 +52,7 @@ public static class CastLayoutBuilder
         {
             ["v"] = 1,
             ["id"] = LayoutId,
-            ["focus"] = interactive ? "interactive" : "passive",
+            ["focus"] = interactive ? focus : FocusPassive,
             ["closeOn"] = new JsonArray("resume", "stop", "itemStart"),
             ["root"] = new JsonObject
             {

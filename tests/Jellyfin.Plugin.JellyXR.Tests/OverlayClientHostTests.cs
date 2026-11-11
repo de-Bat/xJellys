@@ -59,6 +59,40 @@ public class OverlayClientHostTests
         Assert.Equal(Offer, await host.OnEventAsync(Trigger("doublePause")));
     }
 
+    private static string ChosenJson() =>
+        $"{{\"type\":\"chosen\",\"deviceId\":\"d1\",\"sessionId\":\"s1\",\"offerId\":\"cast\",\"itemId\":\"{Guid.NewGuid():N}\",\"positionTicks\":1}}";
+
+    [Fact]
+    public async Task Chosen_AfterSinglePauseOffer_IsPassthrough()
+    {
+        // R16: "interactive on pause" keeps play/seek with the player; only the double-pause path takes them
+        _cfg.TvPanelInteractive = true;
+        var host = NewHost();
+        Assert.Equal(Offer, await host.OnEventAsync(Trigger("pause")));
+        await host.OnEventAsync(ChosenJson());
+        Assert.Equal(CastLayoutBuilder.FocusPassthrough, host.LastFocus);
+    }
+
+    [Fact]
+    public async Task Chosen_AfterDoublePauseOffer_IsInteractive()
+    {
+        _cfg.TvPanelInteractive = true;
+        var host = NewHost();
+        await host.OnEventAsync(Trigger("pause"));
+        await host.OnEventAsync(ChosenJson());
+        Assert.Equal(Offer, await host.OnEventAsync(Trigger("doublePause")));
+        await host.OnEventAsync(ChosenJson());
+        Assert.Equal(CastLayoutBuilder.FocusInteractive, host.LastFocus);
+    }
+
+    [Fact]
+    public async Task Chosen_WithoutOffer_IsInteractive()
+    {
+        var host = NewHost();
+        await host.OnEventAsync(ChosenJson());
+        Assert.Equal(CastLayoutBuilder.FocusInteractive, host.LastFocus);
+    }
+
     [Fact]
     public async Task Chosen_StartsShow()
     {

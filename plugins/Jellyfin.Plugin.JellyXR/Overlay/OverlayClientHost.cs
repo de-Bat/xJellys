@@ -13,7 +13,8 @@ namespace Jellyfin.Plugin.JellyXR.Overlay;
 
 /// <summary>
 /// JellyXR as a client of the JellyTvOverlay host: the cast panel on pause (passive), or offered on pause /
-/// double pause and shown interactive when chosen. Without the host or the app, PauseCoordinator sends toasts.
+/// double pause and shown when chosen: interactive+passthrough from a single pause (play and seek stay with the
+/// player), interactive from a double pause or the chooser. Without the host or the app, PauseCoordinator sends toasts.
 /// The interactive panel carries every actor's detail layout in <c>preload</c>; OK on an actor shows that exact
 /// JSON, so the app opens it from its cache. BACK on a detail returns to the panel in the app (its parent).
 /// </summary>
@@ -35,6 +36,9 @@ public sealed class OverlayClientHost : IHostedService
     private readonly ILogger<OverlayClientHost> _logger;
     private readonly CastShowGate _gate = new();
     private readonly ConcurrentDictionary<string, string> _userOf = new(StringComparer.Ordinal);
+
+    /// <summary>Per device: the focus a "chosen" builds, from the trigger that offered (pause: passthrough).</summary>
+    private readonly ConcurrentDictionary<string, string> _offerFocus = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, DetailSet> _details = new(StringComparer.Ordinal);
     private int _showsStarted;
 
@@ -82,6 +86,9 @@ public sealed class OverlayClientHost : IHostedService
     internal string? UserOf(string deviceId) => _userOf.TryGetValue(deviceId, out var u) ? u : null;
 
     internal CastShowGate Gate => _gate;
+
+    /// <summary>The focus of the last cast build started (tests).</summary>
+    internal string? LastFocus { get; private set; }
 
     /// <summary>Background builds started (tests).</summary>
     internal int ShowsStarted => Volatile.Read(ref _showsStarted);
@@ -137,6 +144,7 @@ public sealed class OverlayClientHost : IHostedService
                     // the cast panel and its actor details close on these (closeOn); builds still running are stale
                     _gate.Invalidate(deviceId);
                     _details.TryRemove(deviceId, out _);
+                    _offerFocus.TryRemove(deviceId, out _);
                     return null;
                 }
 
@@ -153,18 +161,22 @@ public sealed class OverlayClientHost : IHostedService
 
                 if (trigger == "doublePause" || cfg.TvPanelInteractive)
                 {
+                    // a single pause leaves play and seek with the player (interactive+passthrough);
+                    // the double pause (or the chooser after it) takes the remote (interactive)
+                    _offerFocus[deviceId] = trigger == "pause" ? CastLayoutBuilder.FocusPassthrough : CastLayoutBuilder.FocusInteractive;
                     _logger.LogDebug("Offering the cast panel on {Device} ({Trigger})", deviceId, trigger);
                     return OfferJson;
                 }
 
-                StartShow(deviceId, Str(e, "itemId"), Long(e, "positionTicks"), interactive: false);
+                StartShow(deviceId, Str(e, "itemId"), Long(e, "positionTicks"), CastLayoutBuilder.FocusPassive);
                 return null;
             }
 
             case "chosen":
                 if (Str(e, "offerId") == OfferId && Wanted(deviceId, Str(e, "sessionId")) is not null)
                 {
-                    StartShow(deviceId, Str(e, "itemId"), Long(e, "positionTicks"), interactive: true);
+                    var focus = _offerFocus.TryRemove(deviceId, out var f) ? f : CastLayoutBuilder.FocusInteractive;
+                    StartShow(deviceId, Str(e, "itemId"), Long(e, "positionTicks"), focus);
                 }
 
                 return null;
@@ -220,15 +232,16 @@ public sealed class OverlayClientHost : IHostedService
         return cfg;
     }
 
-    private void StartShow(string deviceId, string? itemId, long positionTicks, bool interactive)
+    private void StartShow(string deviceId, string? itemId, long positionTicks, string focus)
     {
+        LastFocus = focus;
         var generation = _gate.Begin(deviceId);
         Interlocked.Increment(ref _showsStarted);
         _ = Task.Run(async () =>
         {
             try
             {
-                await ShowAsync(deviceId, itemId, positionTicks, interactive, generation).ConfigureAwait(false);
+                await ShowAsync(deviceId, itemId, positionTicks, focus, generation).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -237,8 +250,9 @@ public sealed class OverlayClientHost : IHostedService
         });
     }
 
-    private async Task ShowAsync(string deviceId, string? itemId, long positionTicks, bool interactive, long generation)
+    private async Task ShowAsync(string deviceId, string? itemId, long positionTicks, string focus, long generation)
     {
+        var interactive = focus != CastLayoutBuilder.FocusPassive;
         var cfg = Config();
         if (cfg is null || !Guid.TryParse(itemId, out var id))
         {
@@ -264,13 +278,13 @@ public sealed class OverlayClientHost : IHostedService
             set = set with { Cards = set.Cards.Select(c => c with { Character = null }).ToList() };
         }
 
-        var json = await CastJsonAsync(deviceId, set, interactive, cfg.OverlaySeconds, item.Id, UserOf(deviceId)).ConfigureAwait(false);
+        var json = await CastJsonAsync(deviceId, set, interactive, cfg.OverlaySeconds, item.Id, UserOf(deviceId), focus == CastLayoutBuilder.FocusPassthrough).ConfigureAwait(false);
         var shown = _gate.TryShow(deviceId, generation, interactive, () => ShowLayout(deviceId, json));
         if (shown)
         {
             _logger.LogInformation(
                 "Cast panel ({Mode}) for {Item} on {Device}: {Count} people",
-                interactive ? "interactive" : "passive",
+                focus,
                 item.Name,
                 deviceId,
                 set.Cards.Count);
@@ -283,9 +297,9 @@ public sealed class OverlayClientHost : IHostedService
     }
 
     /// <summary>The cast panel layout JSON; interactive panels carry the actor details ready in time in <c>preload</c>.</summary>
-    internal async Task<string> CastJsonAsync(string deviceId, CardSet set, bool interactive, int overlaySeconds, Guid itemId, string? userId)
+    internal async Task<string> CastJsonAsync(string deviceId, CardSet set, bool interactive, int overlaySeconds, Guid itemId, string? userId, bool passthrough = false)
     {
-        var layout = CastLayoutBuilder.Build(set, interactive);
+        var layout = CastLayoutBuilder.Build(set, !interactive ? CastLayoutBuilder.FocusPassive : passthrough ? CastLayoutBuilder.FocusPassthrough : CastLayoutBuilder.FocusInteractive);
         if (!interactive && overlaySeconds > 0)
         {
             layout["ttlMs"] = overlaySeconds * 1000;

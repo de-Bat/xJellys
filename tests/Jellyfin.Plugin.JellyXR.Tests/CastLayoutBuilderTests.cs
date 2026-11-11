@@ -192,4 +192,21 @@ public class CastLayoutBuilderTests
         Assert.Equal(interactive ? "interactive" : "passive", v.Focus);
         Assert.Contains("resume", v.CloseOn);
     }
+
+    [Fact]
+    public void Build_PassthroughFocus()
+    {
+        // R16: the panel opened from a single pause offer leaves the player keys (play, seek) to the player
+        var ada = Person("Ada");
+        var layout = CastLayoutBuilder.Build(new CardSet("Cast", new[] { ada, Person("Cy") }), CastLayoutBuilder.FocusPassthrough);
+
+        Assert.Equal("interactive+passthrough", Str(layout["focus"]));
+        Assert.Equal(0, PagesOf(layout)["intervalMs"]!.GetValue<int>());
+        var row = PersonRows(PagesOf(layout)).First();
+        Assert.True(row["focusable"]!.GetValue<bool>());
+        Assert.Equal(ActorDetailBuilder.IdPrefix + ada.PersonId!.Value.ToString("N"), Str(row["action"]));
+
+        var v = LayoutValidator.Validate(layout.ToJsonString(), "JellyXR");
+        Assert.Equal("interactive+passthrough", v.Focus);
+    }
 }
