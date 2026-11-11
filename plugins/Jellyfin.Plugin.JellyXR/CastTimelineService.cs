@@ -239,6 +239,21 @@ public sealed class CastTimelineService
         }
     }
 
+    /// <summary>TMDB person id of the Jellyfin person item with this name, when it has one.</summary>
+    public int? TmdbIdOf(string name)
+    {
+        try
+        {
+            var person = _library.GetPerson(name);
+            return int.TryParse(person?.GetProviderId(MetadataProvider.Tmdb), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id) ? id : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("No TMDB id for {Name}: {Error}", name, ex.Message);
+            return null;
+        }
+    }
+
     /// <summary>"34 min on screen, next at 1:12:40".</summary>
     public static string Describe(ActorAppearance a, int atSec)
     {

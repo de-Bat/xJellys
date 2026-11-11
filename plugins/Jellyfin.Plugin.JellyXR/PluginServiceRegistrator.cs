@@ -13,6 +13,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<CastIndex>();
         serviceCollection.AddSingleton<TimelineStore>();
         serviceCollection.AddSingleton<XrayarrClient>();
+        serviceCollection.AddSingleton<PosterBadger>();
+        serviceCollection.AddSingleton<TmdbLocalizer>();
         serviceCollection.AddSingleton<MarkerService>();
         serviceCollection.AddSingleton<FaceScanner>();
         serviceCollection.AddSingleton<CastTimelineService>();

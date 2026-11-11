@@ -10,7 +10,7 @@ namespace Jellyfin.Plugin.JellyXR;
 
 /// <summary>
 /// Marks movies and episodes that have X-Ray data with Jellyfin metadata the Android TV app shows as is:
-/// a tag and (opt-in) a genre. Clients cannot run plugin UI, so this is the badge.
+/// a tag, (opt-in) a genre and (opt-in) a badge on the poster / thumbnail. Clients cannot run plugin UI, so this is the badge.
 /// Earlier versions also added the items to an "X-Ray" collection; that collection is deleted on the first sync.
 /// </summary>
 public sealed class MarkerService
@@ -18,11 +18,13 @@ public sealed class MarkerService
     private readonly ILibraryManager _library;
     private readonly TimelineStore _store;
     private readonly XrayarrClient _xrayarr;
+    private readonly PosterBadger _badger;
     private readonly ILogger<MarkerService> _logger;
     private int _collectionRemoved;
 
-    public MarkerService(ILibraryManager library, TimelineStore store, XrayarrClient xrayarr, ILogger<MarkerService> logger)
+    public MarkerService(ILibraryManager library, TimelineStore store, XrayarrClient xrayarr, PosterBadger badger, ILogger<MarkerService> logger)
     {
+        _badger = badger;
         _library = library;
         _store = store;
         _xrayarr = xrayarr;
@@ -122,8 +124,15 @@ public sealed class MarkerService
         progress.Report(100);
     }
 
-    /// <summary>Add or remove the tag and the genre. True when the item changed.</summary>
-    private static async Task<bool> ApplyTagsAsync(BaseItem item, bool has, PluginConfiguration cfg, CancellationToken ct)
+    /// <summary>Add or remove the tag, the genre and the image badge. True when the item changed.</summary>
+    private async Task<bool> ApplyTagsAsync(BaseItem item, bool has, PluginConfiguration cfg, CancellationToken ct)
+    {
+        var tagged = await ApplyNamesAsync(item, has, cfg, ct).ConfigureAwait(false);
+        var badged = await _badger.SyncAsync(item, has && cfg.MarkPoster, ct).ConfigureAwait(false);
+        return tagged || badged;
+    }
+
+    private static async Task<bool> ApplyNamesAsync(BaseItem item, bool has, PluginConfiguration cfg, CancellationToken ct)
     {
         var name = MarkerName(cfg);
         var tags = Toggle(item.Tags, name, has);

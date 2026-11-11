@@ -69,7 +69,7 @@ public sealed class TimelineController : ControllerBase
             OverlaySeconds = Math.Max(0, cfg.OverlaySeconds),
             Cards = set.Value.Cards.Select(c =>
             {
-                var (id, hasImage) = _timelines.PersonOf(c.Actor);
+                var (id, hasImage) = _timelines.PersonOf(c.Canonical ?? c.Actor);
                 return new { c.Actor, Character = cfg.ShowCharacter ? c.Character : null, c.Info, c.OnScreen, PersonId = id, HasImage = hasImage };
             }).ToList()
         };

@@ -33,6 +33,7 @@ public sealed class OverlayClientHost : IHostedService
     private readonly ILibraryManager _library;
     private readonly IUserManager _users;
     private readonly CardService _cards;
+    private readonly MarkerService _markers;
     private readonly ILogger<OverlayClientHost> _logger;
     private readonly CastShowGate _gate = new();
     private readonly ConcurrentDictionary<string, string> _userOf = new(StringComparer.Ordinal);
@@ -40,10 +41,13 @@ public sealed class OverlayClientHost : IHostedService
     /// <summary>Per device: the focus a "chosen" builds, from the trigger that offered (pause: passthrough).</summary>
     private readonly ConcurrentDictionary<string, string> _offerFocus = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, DetailSet> _details = new(StringComparer.Ordinal);
+    /// <summary>Per device: bumped on every item start and stop, so a hint check that ends late is dropped.</summary>
+    private readonly ConcurrentDictionary<string, long> _hintGeneration = new(StringComparer.Ordinal);
     private int _showsStarted;
 
-    public OverlayClientHost(ISessionManager sessions, ILibraryManager library, IUserManager users, CardService cards, ILogger<OverlayClientHost> logger)
+    public OverlayClientHost(ISessionManager sessions, ILibraryManager library, IUserManager users, CardService cards, MarkerService markers, ILogger<OverlayClientHost> logger)
     {
+        _markers = markers;
         _sessions = sessions;
         _library = library;
         _users = users;
@@ -56,6 +60,7 @@ public sealed class OverlayClientHost : IHostedService
             ? (s.Client, s.DeviceName)
             : null;
         LoadPerson = LoadPersonAsync;
+        HasXray = HasXrayAsync;
     }
 
     /// <summary>Most actor details preloaded with one panel (bounds the payload and the TV's image preloads).</summary>
@@ -78,6 +83,12 @@ public sealed class OverlayClientHost : IHostedService
 
     /// <summary>The person and their titles for (person, user id, playing item), or null.</summary>
     internal Func<Guid, string?, Guid, CancellationToken, Task<(PersonInfo Person, IReadOnlyList<LibraryTitle> Titles)?>> LoadPerson { get; set; }
+
+    /// <summary>True when the item (id from the trigger) has X-Ray data and cards are not switched off for it.</summary>
+    internal Func<string?, Configuration.PluginConfiguration, Task<bool>> HasXray { get; set; }
+
+    /// <summary>The latest start-of-playback hint check (tests).</summary>
+    internal Task LastHint { get; private set; } = Task.CompletedTask;
 
     /// <summary>How long the interactive panel waits for actor detail preloads; later ones are shown on demand.</summary>
     internal TimeSpan PreloadWait { get; set; } = TimeSpan.FromMilliseconds(1500);
@@ -145,6 +156,15 @@ public sealed class OverlayClientHost : IHostedService
                     _gate.Invalidate(deviceId);
                     _details.TryRemove(deviceId, out _);
                     _offerFocus.TryRemove(deviceId, out _);
+                    if (trigger is "itemStart" or "stop")
+                    {
+                        var hint = _hintGeneration.AddOrUpdate(deviceId, 1, (_, g) => g + 1);
+                        if (trigger == "itemStart" && Wanted(deviceId, Str(e, "sessionId")) is { TvStartHint: true } hintCfg)
+                        {
+                            LastHint = HintAsync(deviceId, Str(e, "itemId"), hintCfg, hint);
+                        }
+                    }
+
                     return null;
                 }
 
@@ -230,6 +250,38 @@ public sealed class OverlayClientHost : IHostedService
         }
 
         return cfg;
+    }
+
+    /// <summary>Playback started: a short "X-Ray" chip when the item has X-Ray data. Runs after the handler returned.</summary>
+    private async Task HintAsync(string deviceId, string? itemId, Configuration.PluginConfiguration cfg, long generation)
+    {
+        try
+        {
+            await Task.Yield();
+            if (!await HasXray(itemId, cfg).ConfigureAwait(false)
+                || !_hintGeneration.TryGetValue(deviceId, out var now) || now != generation)
+            {
+                return;
+            }
+
+            var shown = ShowLayout(deviceId, HintLayoutBuilder.Build(cfg.MarkerName).ToJsonString(OverlayJson.Options));
+            _logger.LogDebug("X-Ray hint on {Device}: {State}", deviceId, shown ? "shown" : "rejected by the host");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("X-Ray hint failed: {Error}", ex.Message);
+        }
+    }
+
+    private async Task<bool> HasXrayAsync(string? itemId, Configuration.PluginConfiguration cfg)
+    {
+        if (!Guid.TryParse(itemId, out var id) || _library.GetItemById(id) is not { } item || item is not (Movie or Episode))
+        {
+            return false;
+        }
+
+        return CardService.ScopeFor(item, cfg) != Configuration.CastScope.Off
+            && await _markers.HasDataAsync(item, cfg, CancellationToken.None).ConfigureAwait(false);
     }
 
     private void StartShow(string deviceId, string? itemId, long positionTicks, string focus)

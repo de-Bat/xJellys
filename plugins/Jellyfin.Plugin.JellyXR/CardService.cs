@@ -9,7 +9,9 @@ namespace Jellyfin.Plugin.JellyXR;
 /// <param name="OnScreen">Seen around the pause position (scene data), as opposed to the rest of the cast.</param>
 /// <param name="PersonId">Jellyfin person item, when the actor is in the item's people.</param>
 /// <param name="ImageUrl">Server-relative portrait URL, when the person has a primary image.</param>
-public readonly record struct Card(string Actor, string? Character, string? Info = null, bool OnScreen = false, Guid? PersonId = null, string? ImageUrl = null);
+/// <param name="Canonical">Jellyfin's name for the person when <paramref name="Actor"/> was translated; person lookups use it.</param>
+/// <param name="TmdbId">TMDB person id, when known (from Xrayarr or Jellyfin).</param>
+public readonly record struct Card(string Actor, string? Character, string? Info = null, bool OnScreen = false, Guid? PersonId = null, string? ImageUrl = null, string? Canonical = null, int? TmdbId = null);
 
 public readonly record struct CardSet(string Header, IReadOnlyList<Card> Cards);
 
@@ -20,10 +22,12 @@ public sealed class CardService
     private readonly TimelineStore _store;
     private readonly XrayarrClient _xrayarr;
     private readonly CastTimelineService _timelines;
+    private readonly TmdbLocalizer _localizer;
     private readonly ILogger<CardService> _logger;
 
-    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr, CastTimelineService timelines, ILogger<CardService> logger)
+    public CardService(FaceScanner scanner, TimelineStore store, XrayarrClient xrayarr, CastTimelineService timelines, TmdbLocalizer localizer, ILogger<CardService> logger)
     {
+        _localizer = localizer;
         _timelines = timelines;
         _scanner = scanner;
         _store = store;
@@ -67,16 +71,31 @@ public sealed class CardService
         var sec = (int)TimeSpan.FromTicks(positionTicks).TotalSeconds;
 
         // Jellyfin's cast supplies the canonical name and role; Xrayarr people missing from it are kept with Xrayarr's character.
-        Card? ToCard(string name, string? character, bool keepUnknown)
+        // TMDB id of each cast member, looked up once and only when Xrayarr hands us ids to compare with
+        Dictionary<string, int?>? castTmdb = null;
+        int? TmdbOf(PersonInfo p)
         {
-            var p = cast.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+            castTmdb ??= new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase);
+            if (!castTmdb.TryGetValue(p.Name, out var id))
+            {
+                castTmdb[p.Name] = id = _timelines.TmdbIdOf(p.Name);
+            }
+
+            return id;
+        }
+
+        // The id is the best key: it survives a different spelling or language between Jellyfin and Xrayarr. Name is the fallback.
+        Card? ToCard(string name, string? character, bool keepUnknown, int? tmdbPersonId = null)
+        {
+            var p = tmdbPersonId is { } want ? cast.FirstOrDefault(c => TmdbOf(c) == want) : null;
+            p ??= cast.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
             if (p is null)
             {
-                return keepUnknown ? new Card(name, string.IsNullOrWhiteSpace(character) ? null : character) : null;
+                return keepUnknown ? new Card(name, string.IsNullOrWhiteSpace(character) ? null : character, TmdbId: tmdbPersonId) : null;
             }
 
             var role = string.IsNullOrWhiteSpace(p.Role) ? character : p.Role;
-            return new Card(p.Name, string.IsNullOrWhiteSpace(role) ? null : role);
+            return new Card(p.Name, string.IsNullOrWhiteSpace(role) ? null : role, TmdbId: tmdbPersonId ?? (castTmdb is null ? null : TmdbOf(p)));
         }
 
         // First source that has scene data for this item wins (even if nobody is on screen at this position).
@@ -102,7 +121,7 @@ public sealed class CardService
                         _logger.LogDebug("Scene data for {Item} from Xrayarr", item.Name);
                         var ms = (long)TimeSpan.FromTicks(positionTicks).TotalMilliseconds;
                         return xr.PeopleAround(ms, ms - (cfg.SceneBackSeconds * 1000L), ms + (cfg.SceneForwardSeconds * 1000L))
-                            .Select(p => ToCard(p.Name, p.Character, true)).OfType<Card>().ToList();
+                            .Select(p => ToCard(p.Name, p.Character, true, p.TmdbPersonId)).OfType<Card>().ToList();
                     }
                 }
             }
@@ -143,7 +162,49 @@ public sealed class CardService
             _ => await Current().ConfigureAwait(false)
         };
 
-        return set is { } s && cfg.ShowAppearance ? await WithAppearanceAsync(item, s, sec, cfg, ct).ConfigureAwait(false) : set;
+        var result = set is { } s && cfg.ShowAppearance ? await WithAppearanceAsync(item, s, sec, cfg, ct).ConfigureAwait(false) : set;
+        return result is { } r ? await LocalizeAsync(item, r, cfg, ct).ConfigureAwait(false) : result;
+    }
+
+    /// <summary>Swaps actor and character for the configured language; whatever TMDB lacks stays as it was.</summary>
+    private async Task<CardSet> LocalizeAsync(BaseItem item, CardSet set, Configuration.PluginConfiguration cfg, CancellationToken ct)
+    {
+        if (!TmdbLocalizer.Active(cfg))
+        {
+            return set;
+        }
+
+        try
+        {
+            var credits = await _localizer.GetAsync(item, cfg, ct).ConfigureAwait(false);
+            if (credits.Count == 0)
+            {
+                return set;
+            }
+
+            var cards = set.Cards.Select(c =>
+            {
+                var id = c.TmdbId ?? _timelines.TmdbIdOf(c.Actor);
+                if (id is not { } tmdb || !credits.TryGetValue(tmdb, out var l))
+                {
+                    return c;
+                }
+
+                var name = string.IsNullOrWhiteSpace(l.Name) ? c.Actor : l.Name!;
+                var role = string.IsNullOrWhiteSpace(l.Character) ? c.Character : l.Character;
+                return c with { Actor = name, Character = role, Canonical = c.Actor, TmdbId = tmdb };
+            }).ToList();
+            return set with { Cards = cards };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Localizing cards for {Item} failed: {Error}", item.Name, ex.Message);
+            return set;
+        }
     }
 
     private async Task<CardSet> WithAppearanceAsync(BaseItem item, CardSet set, int sec, Configuration.PluginConfiguration cfg, CancellationToken ct)
@@ -177,12 +238,13 @@ public sealed class CardService
         var cast = _scanner.CastOf(item);
         var cards = set.Cards.Select(c =>
         {
-            if (!cast.Any(p => string.Equals(p.Name, c.Actor, StringComparison.OrdinalIgnoreCase)))
+            var name = c.Canonical ?? c.Actor;
+            if (!cast.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
             {
                 return c;
             }
 
-            var (id, hasImage) = _timelines.PersonOf(c.Actor);
+            var (id, hasImage) = _timelines.PersonOf(name);
             return id is { } g ? c with { PersonId = g, ImageUrl = hasImage ? PortraitUrl(g) : null } : c;
         }).ToList();
         return set with { Cards = cards };

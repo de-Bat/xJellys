@@ -18,7 +18,7 @@ public class MarkTask : IScheduledTask
 
     public string Key => "JellyXRMark";
 
-    public string Description => "Adds the X-Ray tag and (if enabled) genre to movies and episodes with scene data, and removes them from the rest. Run it after changing the marker settings.";
+    public string Description => "Adds the X-Ray tag and (if enabled) genre and poster badge to movies and episodes with scene data, and removes them from the rest. Run it after changing the marker settings.";
 
     public string Category => "JellyXR";
 

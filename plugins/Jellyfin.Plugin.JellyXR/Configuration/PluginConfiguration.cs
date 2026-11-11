@@ -99,6 +99,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool TvPanelInteractive { get; set; } = false;
 
+    /// <summary>JellyTvOverlay app: when an item with X-Ray data starts playing, show a small "X-Ray" chip for a few seconds.</summary>
+    public bool TvStartHint { get; set; } = true;
+
     /// <summary>Seconds the pause panel (web and TV companion) stays up. 0 = until playback resumes.</summary>
     public int OverlaySeconds { get; set; } = 0;
 
@@ -107,6 +110,12 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Also add <see cref="MarkerName"/> as a genre, so the Android TV app shows it on the movie page. Off by default: it mixes into real genres.</summary>
     public bool MarkGenre { get; set; } = false;
+
+    /// <summary>
+    /// Put an "X-RAY" badge on the poster / episode thumbnail of items with X-Ray data (needs <see cref="MarkItems"/>).
+    /// The original image file is kept; a badged copy in the plugin data directory is shown instead. Off by default.
+    /// </summary>
+    public bool MarkPoster { get; set; } = false;
 
     /// <summary>Name of the tag and genre that mark items with X-Ray data.</summary>
     public string MarkerName { get; set; } = "X-Ray";
@@ -140,6 +149,12 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Optional path rewrite for path lookups: "jellyfinPrefix=xrayarrPrefix", several separated by ';'.</summary>
     public string XrayarrPathMap { get; set; } = string.Empty;
+
+    /// <summary>Language for actor and character names, a TMDB tag such as "he" or "de-DE". Empty = keep Jellyfin's / Xrayarr's names. Falls back to English per person.</summary>
+    public string CardLanguage { get; set; } = string.Empty;
+
+    /// <summary>TMDB API key (v3 key or v4 read token) used to fetch names in <see cref="CardLanguage"/>.</summary>
+    public string TmdbApiKey { get; set; } = string.Empty;
 
     /// <summary>Zip with the SCRFD detector and ArcFace recognizer (insightface "buffalo_s": det_500m.onnx + w600k_mbf.onnx). Check the model license for your use.</summary>
     public string ModelZipUrl { get; set; } = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip";

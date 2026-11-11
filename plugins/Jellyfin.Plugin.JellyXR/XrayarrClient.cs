@@ -21,6 +21,13 @@ public sealed class XrayarrPerson
 
     [JsonPropertyName("confidence")]
     public double? Confidence { get; set; }
+
+    /// <summary>TMDB person id; the id shared with Jellyfin's person item, so matching does not depend on spelling or language.</summary>
+    [JsonPropertyName("tmdbPersonId")]
+    public int? TmdbPersonId { get; set; }
+
+    [JsonPropertyName("imdbPersonId")]
+    public string? ImdbPersonId { get; set; }
 }
 
 public sealed class XrayarrSegment
@@ -63,7 +70,9 @@ public sealed class XrayarrTimeline
         var list = new List<XrayarrPerson>();
         foreach (var p in hits.SelectMany(s => s.Cast))
         {
-            if (!string.IsNullOrWhiteSpace(p.Name) && seen.Add(p.Name))
+            // one person once, whether Xrayarr spells the name the same way in every segment or not
+            var key = p.TmdbPersonId is { } t ? "tmdb:" + t : p.Name;
+            if (!string.IsNullOrWhiteSpace(p.Name) && seen.Add(key))
             {
                 list.Add(p);
             }

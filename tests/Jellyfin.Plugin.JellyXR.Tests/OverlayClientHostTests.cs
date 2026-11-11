@@ -14,16 +14,18 @@ public class OverlayClientHostTests
     private readonly PluginConfiguration _cfg = new() { Enabled = true, TvOverlay = true, ClientFilter = "Android TV" };
     private readonly List<string> _shows = new();
     private bool _hasApp = true;
+    private bool _hasXray;
 
     private OverlayClientHost NewHost()
     {
         // Library and cards are never reached by these tests (builds start in the background and are counted only).
-        var host = new OverlayClientHost(null!, null!, null!, null!, NullLogger<OverlayClientHost>.Instance)
+        var host = new OverlayClientHost(null!, null!, null!, null!, null!, NullLogger<OverlayClientHost>.Instance)
         {
             Config = () => _cfg,
             FindSession = id => id == "s1" ? ("Android TV", "Living room") : null,
         };
         host.AppPresent = _ => _hasApp;
+        host.HasXray = (_, _) => Task.FromResult(_hasXray);
         host.ShowLayout = (d, json) =>
         {
             _shows.Add(json);
@@ -367,6 +369,68 @@ public class OverlayClientHostTests
         Assert.Null(layout["preload"]);
         Assert.Equal(10000, layout["ttlMs"]!.GetValue<int>());
         Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task ItemStart_WithXray_ShowsValidHint()
+    {
+        _hasXray = true;
+        _cfg.MarkerName = "X-Ray";
+        var host = NewHost();
+        Assert.Null(await host.OnEventAsync(Trigger("itemStart")));
+        await host.LastHint;
+
+        var json = Assert.Single(_shows);
+        var v = LayoutValidator.Validate(json, "JellyXR");
+        Assert.Equal("JellyXR/" + HintLayoutBuilder.LayoutId, v.Id);
+        var layout = JsonNode.Parse(json)!.AsObject();
+        Assert.Equal("passive", layout["focus"]!.GetValue<string>());
+        Assert.Equal(HintLayoutBuilder.Seconds * 1000, layout["ttlMs"]!.GetValue<int>());
+
+        // must not be rejected as stale while playing, and must give way to the cast panel on pause
+        var closeOn = layout["closeOn"]!.AsArray().Select(n => n!.GetValue<string>()).ToList();
+        Assert.DoesNotContain("resume", closeOn);
+        Assert.Contains("pause", closeOn);
+        Assert.Contains(Walk(layout["root"]), n => n["text"]?.GetValue<string>() == "X-Ray");
+    }
+
+    [Fact]
+    public async Task ItemStart_NoHint_WithoutData_SettingOff_NoApp_OrOtherClient()
+    {
+        var host = NewHost();
+        await host.OnEventAsync(Trigger("itemStart")); // no X-Ray data
+        await host.LastHint;
+
+        _hasXray = true;
+        _cfg.TvStartHint = false;
+        await host.OnEventAsync(Trigger("itemStart"));
+        await host.LastHint;
+
+        _cfg.TvStartHint = true;
+        _hasApp = false;
+        await host.OnEventAsync(Trigger("itemStart"));
+        await host.LastHint;
+
+        _hasApp = true;
+        await host.OnEventAsync(Trigger("itemStart", session: "other")); // session not found / filtered
+        await host.LastHint;
+
+        Assert.Empty(_shows);
+    }
+
+    [Fact]
+    public async Task ItemStart_HintDropped_WhenPlaybackMovedOn()
+    {
+        var gate = new TaskCompletionSource<bool>();
+        var host = NewHost();
+        host.HasXray = (_, _) => gate.Task;
+        await host.OnEventAsync(Trigger("itemStart"));
+        var first = host.LastHint;
+        await host.OnEventAsync(Trigger("stop"));
+        gate.SetResult(true);
+        await first;
+
+        Assert.Empty(_shows);
     }
 
     private static IEnumerable<JsonObject> Walk(JsonNode? node)

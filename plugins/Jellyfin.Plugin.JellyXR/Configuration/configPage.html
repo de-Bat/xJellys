@@ -39,12 +39,20 @@
           <div class="fieldDescription">Off: the panel appears by itself on pause and the remote keeps driving the player. On: pausing offers the panel and it opens with ▲ ▼ / OK on the cast list, while Play/Pause and ◀ ▶ (seek) keep going to the player. A double pause (pause, play, pause within 4 s) always offers it, fully interactive: it holds the remote (◀ ▶ flip pages). BACK always closes the panel and gives the remote back.</div>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="TvStartHint" type="checkbox" is="emby-checkbox" /><span>JellyTvOverlay: show an "X-Ray" chip when a title with X-Ray data starts playing</span></label>
+          <div class="fieldDescription">A small chip in the top right corner for 6 seconds ("Pause to see the cast"). Only on TVs with the JellyTvOverlay app, and not for shows whose scope is Off.</div>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="MarkItems" type="checkbox" is="emby-checkbox" /><span>Mark movies and episodes that have X-Ray data (tag)</span></label>
           <div class="fieldDescription">The tag works as a library filter in every client, including the Android TV app. Kept up to date after each scan and by the scheduled task <em>Mark items with X-Ray data</em> (run it after changing these settings).</div>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="MarkGenre" type="checkbox" is="emby-checkbox" /><span>Also add it as a genre (shows on the Android TV movie page)</span></label>
           <div class="fieldDescription">The genre line is the only place the Android TV app shows it on the item page. It mixes into the real genres; a metadata refresh that replaces all metadata removes it until the next marker run.</div>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="MarkPoster" type="checkbox" is="emby-checkbox" /><span>Also put an X-RAY badge on the poster / episode thumbnail</span></label>
+          <div class="fieldDescription">Shows in every client wherever the image is shown, including the Android TV grids and rows. Your image files are not changed: a badged copy is kept in the plugin data folder and the item points at it; switching this off (then running the marker task) points it back. Needs the tag setting above. A library scan or image refresh can put the plain image back until the next marker run; clients may show a cached image for a while. Series and season posters get no badge.</div>
         </div>
         <div class="inputContainer">
           <label class="inputLabel inputLabelUnfocused" for="MarkerName">Marker name (tag and genre)</label>
@@ -96,6 +104,8 @@
         ['XrayarrApiKey', 'Xrayarr API key (Xrayarr: Settings &rarr; General)', 'password'],
         ['XrayarrPathMap', 'Xrayarr path rewrite for path lookups, optional: jellyfinPrefix=xrayarrPrefix; separate several with ; (movies use TMDB id, episodes TVDB id + S/E first)', 'text'],
         ['ClientFilter', 'Client filter (comma separated, empty = all remote-controllable clients)', 'text'],
+        ['CardLanguage', 'Language for actor and character names (TMDB tag, e.g. he, de, fr-CA; empty = keep Jellyfin names). Falls back to English per person when TMDB has no translation', 'text'],
+        ['TmdbApiKey', 'TMDB API key or read access token (themoviedb.org: Settings &rarr; API), needed for the language above', 'password'],
         ['Scope', 'Default scope', 'select:Current|Scene|Episode|Off'],
         ['CardMode', 'Card mode (Combined = actors packed into as few messages as fit, Separate = one message per actor)', 'select:Combined|Separate'],
         ['MaxCards', 'Max actors per pause (0 = all)', 'number'],
@@ -219,6 +229,8 @@
           page.querySelector('#TvPanelInteractive').checked = c.TvPanelInteractive === true;
           page.querySelector('#MarkItems').checked = c.MarkItems !== false;
           page.querySelector('#MarkGenre').checked = c.MarkGenre === true;
+          page.querySelector('#MarkPoster').checked = c.MarkPoster === true;
+          page.querySelector('#TvStartHint').checked = c.TvStartHint !== false;
           page.querySelector('#MarkerName').value = c.MarkerName || 'X-Ray';
           fields.forEach(function (f) { page.querySelector('#' + f[0]).value = c[f[0]]; });
           rules = (c.SeriesRules || []).map(function (r) { return Object.assign({}, r); });
@@ -310,6 +322,8 @@
           c.TvPanelInteractive = page.querySelector('#TvPanelInteractive').checked;
           c.MarkItems = page.querySelector('#MarkItems').checked;
           c.MarkGenre = page.querySelector('#MarkGenre').checked;
+          c.MarkPoster = page.querySelector('#MarkPoster').checked;
+          c.TvStartHint = page.querySelector('#TvStartHint').checked;
           c.MarkerName = page.querySelector('#MarkerName').value.trim() || 'X-Ray';
           c.SeriesRules = rules;
           fields.forEach(function (f) {
