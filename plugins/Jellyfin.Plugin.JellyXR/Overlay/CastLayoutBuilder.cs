@@ -37,17 +37,19 @@ public static class CastLayoutBuilder
         var interactive = focus is FocusInteractive or FocusPassthrough;
         var pages = Paginate(set);
         var split = set.Cards.Any(c => c.OnScreen) && set.Cards.Any(c => !c.OnScreen);
+        var maxUsed = pages.Count == 0 ? 0 : pages.Max(p => UsedDp(p, split));
+        var h = Math.Min(PanelMaxH, Frac((2 * PadDp) + HeaderDp + maxUsed));
+
+        // node h is a fraction of the parent's inner box (layout v1), here the panel minus its pad: row heights in
+        // screen dp are converted against it
+        var innerDp = (h * ScreenDp) - (2 * PadDp);
         var pageNodes = new JsonArray();
-        var maxUsed = 0;
         var rowIndex = 0;
         for (var i = 0; i < pages.Count; i++)
         {
-            var (node, used) = PageNode(pages[i], i, pages.Count, split, interactive, ref rowIndex);
-            pageNodes.Add(node);
-            maxUsed = Math.Max(maxUsed, used);
+            pageNodes.Add(PageNode(pages[i], i, pages.Count, split, interactive, innerDp, ref rowIndex));
         }
 
-        var h = Math.Min(PanelMaxH, Frac((2 * PadDp) + HeaderDp + maxUsed));
         return new JsonObject
         {
             ["v"] = 1,
@@ -115,7 +117,10 @@ public static class CastLayoutBuilder
 
     private static int RowDp(Card c, bool split) => split && !c.OnScreen ? Small : Big;
 
-    private static (JsonObject Node, int UsedDp) PageNode(Page page, int index, int count, bool split, bool interactive, ref int rowIndex)
+    private static int UsedDp(Page page, bool split) =>
+        page.Entries.Sum(e => e is Card c ? RowDp(c, split) + Gap : Section);
+
+    private static JsonObject PageNode(Page page, int index, int count, bool split, bool interactive, double innerDp, ref int rowIndex)
     {
         var header = new JsonArray { Text(page.Title, 17, "#FFFFFFFF", bold: true) };
         if (count > 1)
@@ -127,27 +132,25 @@ public static class CastLayoutBuilder
         {
             new JsonObject { ["type"] = "row", ["gap"] = Frac(12), ["children"] = header },
         };
-        var used = 0;
         foreach (var e in page.Entries)
         {
             if (e is string sec)
             {
-                children.Add(new JsonObject { ["type"] = "stack", ["h"] = Frac(1), ["bg"] = "#28FFFFFF" });
+                children.Add(new JsonObject { ["type"] = "stack", ["h"] = Round(1 / innerDp), ["bg"] = "#28FFFFFF" });
                 children.Add(Text(sec.ToUpperInvariant(), 12, "#AAFFFFFF"));
-                used += Section;
                 continue;
             }
 
             var card = (Card)e;
-            children.Add(Row(card, split && !card.OnScreen, interactive, rowIndex++));
-            used += RowDp(card, split) + Gap;
+            children.Add(Row(card, split && !card.OnScreen, interactive, innerDp, rowIndex++));
         }
 
-        return (new JsonObject { ["type"] = "column", ["gap"] = Frac(Gap), ["children"] = children }, used);
+        return new JsonObject { ["type"] = "column", ["gap"] = Frac(Gap), ["children"] = children };
     }
 
-    private static JsonObject Row(Card c, bool small, bool interactive, int index)
+    private static JsonObject Row(Card c, bool small, bool interactive, double innerDp, int index)
     {
+        var rowDp = small ? Small : Big;
         var lines = new JsonArray { Text(c.Actor, small ? 14 : 16, "#FFFFFFFF", bold: true) };
         if (!string.IsNullOrEmpty(c.Character))
         {
@@ -169,7 +172,7 @@ public static class CastLayoutBuilder
                 ["fit"] = "cover",
                 ["round"] = true,
                 ["bg"] = "#FF3A404E",
-                ["h"] = Frac((small ? Small : Big) - 4),
+                ["h"] = Round((rowDp - 4.0) / rowDp), // of the row
             });
         }
 
@@ -178,6 +181,7 @@ public static class CastLayoutBuilder
         {
             ["type"] = "row",
             ["id"] = "p" + index,
+            ["h"] = Round(rowDp / innerDp), // of the panel's inner box
             ["gap"] = Frac(12),
             ["children"] = kids,
         };

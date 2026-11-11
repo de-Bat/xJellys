@@ -209,4 +209,26 @@ public class CastLayoutBuilderTests
         var v = LayoutValidator.Validate(layout.ToJsonString(), "JellyXR");
         Assert.Equal("interactive+passthrough", v.Focus);
     }
+
+    [Fact]
+    public void RowHeights_AreFractionsOfThePanelInnerBox()
+    {
+        // layout v1: h is a fraction of the parent's inner box. A 64 dp row (540 dp screen) must come out 64 dp
+        // tall on the device, with its round image 60 dp, not 64 dp of the screen applied to the panel again.
+        var set = new CardSet("Cast", new[] { Person("A"), Person("B"), Person("C") });
+        var layout = CastLayoutBuilder.Build(set, interactive: true);
+        var root = layout["root"]!.AsObject();
+        var innerDp = (root["h"]!.GetValue<double>() * 540) - (2 * root["pad"]!.GetValue<double>() * 540);
+
+        var rows = Walk(root).Where(n => Str(n["type"]) == "row" && n["id"] is not null).ToList();
+        Assert.Equal(3, rows.Count);
+        foreach (var row in rows)
+        {
+            Assert.Equal(64, row["h"]!.GetValue<double>() * innerDp, 0);
+            var image = Walk(row).Single(n => Str(n["type"]) == "image");
+            Assert.Equal(60, image["h"]!.GetValue<double>() * 64, 0);
+        }
+
+        Assert.Equal("JellyXR/cast", LayoutValidator.Validate(layout.ToJsonString(), "JellyXR").Id);
+    }
 }
