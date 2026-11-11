@@ -141,7 +141,8 @@ public sealed class OverlayQueue(TimeProvider clock)
             return null;
         }
 
-        return d.Log.Where(o => o.Seq > since).ToList();
+        // superseded shows carry no layout any more (a later op of the same id follows): skip them
+        return d.Log.Where(o => o.Seq > since && !(o.Op == "show" && o.Layout is null)).ToList();
     }
 
     // Layouts not yet expired per the clock, in show order. Caller holds d.Gate.
@@ -151,9 +152,29 @@ public sealed class OverlayQueue(TimeProvider clock)
         return d.Order.Select(id => d.Shown[id]).Where(e => e.ExpiresAt is not { } at || at > now).Select(e => e.Layout).ToList();
     }
 
-    // Caller holds d.Gate.
+    /// <summary>Show ops in the device's log that still hold a layout (tests).</summary>
+    internal int LoggedPayloads(string deviceId)
+    {
+        var d = Get(deviceId);
+        lock (d.Gate)
+        {
+            return d.Log.Count(o => o.Layout is not null);
+        }
+    }
+
+    // Caller holds d.Gate. A show or close of an id drops the layout of that id's earlier shows still in the log:
+    // they are superseded, and the log would otherwise hold up to MaxLog full layouts (each up to 1 MB).
     private static long Append(DeviceQueue d, string op, string id, JsonObject? json)
     {
+        for (var i = 0; i < d.Log.Count; i++)
+        {
+            var o = d.Log[i];
+            if (o.Layout is not null && o.Op == "show" && string.Equals(o.LayoutId, id, StringComparison.Ordinal))
+            {
+                d.Log[i] = o with { Layout = null };
+            }
+        }
+
         var seq = ++d.Head;
         d.Log.Add(new OverlayOp(seq, op, id, json));
         if (d.Log.Count > MaxLog)

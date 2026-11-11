@@ -263,4 +263,27 @@ public class OverlayQueueTests
         Assert.Equal(new[] { "reset", "show" }, ops.Select(o => o.Op));
         Assert.Equal("b", ops[1].LayoutId);
     }
+
+    [Fact]
+    public async Task SupersededShows_DropTheirPayload_AndAreNotDelivered()
+    {
+        // R20: a show replaced by a later show or close of the same id keeps no layout in the log and is skipped
+        var q = new OverlayQueue(new FakeTimeProvider());
+        var start = q.Show("d1", L("x"));
+        q.Show("d1", L("a"));
+        q.Show("d1", L("b"));
+        var a2 = q.Show("d1", L("a"));
+        Assert.Equal(3, q.LoggedPayloads("d1")); // x, b, a2
+
+        var ops = await q.WaitAsync("d1", start, Short, CancellationToken.None);
+        Assert.Equal(new[] { "b", "a" }, ops.Select(o => o.LayoutId));
+        Assert.All(ops, o => Assert.NotNull(o.Layout));
+        Assert.Equal(a2, ops[^1].Seq);
+
+        var closed = q.Close("d1", "a");
+        Assert.Equal(2, q.LoggedPayloads("d1")); // x, b
+        ops = await q.WaitAsync("d1", start, Short, CancellationToken.None);
+        Assert.Equal(new[] { "show:b", "close:a" }, ops.Select(o => o.Op + ":" + o.LayoutId));
+        Assert.Equal(closed, ops[^1].Seq);
+    }
 }

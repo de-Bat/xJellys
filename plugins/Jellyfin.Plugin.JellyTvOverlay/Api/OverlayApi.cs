@@ -13,7 +13,8 @@ public sealed record ApiResult(int Status, string? Json);
 /// </summary>
 public sealed class OverlayApi(OverlayRuntime rt)
 {
-    private static readonly JsonSerializerOptions RelaxedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    // MaxDepth: a layout may nest 32 node levels (about 2 JSON levels each, plus the response and preload wrappers)
+    private static readonly JsonSerializerOptions RelaxedJson = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, MaxDepth = 256 };
 
     public static readonly TimeSpan PollHold = TimeSpan.FromSeconds(25);
 

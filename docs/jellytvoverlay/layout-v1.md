@@ -42,7 +42,9 @@ A binding is one of:
 
 The app maps remote keys as follows: D-pad to `left` `right` `up` `down`, centre and Enter to `ok`, Play/Pause and Play to `play`, and Back to `back`. Back acts on key release.
 
-In an interactive layout, a key is resolved in this order:
+BACK always closes the window and returns the remote to the player (or to the next interactive window underneath); the app then sends `closed` with reason `back`. A layout cannot keep itself open on BACK. A `back` binding only adds an action: an `action` binding is reported first, then the window closes. A `step` binding on `back` is ignored.
+
+In an interactive layout, any other key is resolved in this order:
 
 1. A binding in `keys` wins.
 2. Up/down on a focused `scroll` text scroll it while it can still scroll that way. At its top or end, focus moves on as in 3.
@@ -137,7 +139,8 @@ Images: a server-relative `src` is fetched from the Jellyfin server with the use
 
 - `type`: `action` or `closed`.
 - `value`: map of `value` node id to number for the layout (current values).
-- `reason` (for `closed`): `back`, `ttl`, `finished` or `replaced`.
+- `reason` (for `closed`): `back`, `ttl` or `finished`. `replaced` is reserved: the app does not send it (a show of an id already shown replaces the window in place, without an event), and the host never removes a layout for it.
+- The app retries a `closed` event that failed on the network or with a server error (5xx) after 1, 2 and 4 s. Until the host stops listing a layout the app closed itself (or for 60 s), the app does not reopen it from a snapshot; a new `show` of that id after the close opens it as usual.
 
 ### Host to client (plugin)
 
@@ -154,7 +157,7 @@ Each is a JSON string passed to the client's handler.
 
 ## Size
 
-`Show` returns `false` (and logs why) for a layout JSON over 1 MB (UTF-8, preloads included). Poll answers carry non-ASCII text as UTF-8, not `\uXXXX` escapes.
+`Show` returns `false` (and logs why) for a layout JSON over 1 MB (UTF-8, preloads included). Nodes may nest at most 32 levels below `root` (`root` is level 0; preloaded layouts count on their own); a deeper layout is rejected. The app reads at most 4 MB per Poll answer; a larger one counts as a network error. Poll answers carry non-ASCII text as UTF-8, not `\uXXXX` escapes.
 
 ## Stale shows
 
@@ -209,9 +212,6 @@ A near full-screen card over the dimmed paused video. Left: portrait, name, birt
   "parent": "cast",
   "closeOn": ["stop", "itemStart", "resume"],
   "suppressTriggers": ["pause", "doublePause"],
-  "keys": {
-    "back": { "op": "action", "action": "back" }
-  },
   "root": {
     "type": "stack",
     "x": 0.05, "y": 0.06, "w": 0.9, "h": 0.88,

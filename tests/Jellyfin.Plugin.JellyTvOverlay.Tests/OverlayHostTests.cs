@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Jellyfin.Plugin.JellyTvOverlay.Api;
 using Jellyfin.Plugin.JellyTvOverlay.Configuration;
 using Jellyfin.Plugin.JellyTvOverlay.Host;
+using Jellyfin.Plugin.JellyTvOverlay.Layout;
 using Jellyfin.Plugin.JellyTvOverlay.Triggers;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -214,6 +215,27 @@ public sealed class OverlayHostTests : IDisposable
         var close = Assert.Single(delta["ops"]!.AsArray());
         Assert.Equal("close", (string?)close!["op"]);
         Assert.Null(close["layout"]);
+    }
+
+    [Fact]
+    public async Task Poll_DeepestAllowedLayout_Serializes()
+    {
+        // a layout at the validator's depth limit (32 node levels) must survive the poll serializer too
+        var rt = Runtime();
+        var api = new OverlayApi(rt);
+        OverlayHost.Register("c", "C", Handler);
+        OverlayHost.Attach(rt.Dispatcher, rt.Queue, _ => true);
+        var node = "{\"type\":\"text\",\"text\":\"x\"}";
+        for (var i = 0; i < LayoutValidator.MaxNodeDepth; i++)
+        {
+            node = "{\"type\":\"column\",\"children\":[" + node + "]}";
+        }
+
+        Assert.True(OverlayHost.Show("c", Dev, "{\"v\":1,\"id\":\"deep\",\"root\":" + node + "}"));
+        var r = await api.PollAsync(Dev, 0, Anyone, TimeSpan.Zero, CancellationToken.None);
+        Assert.Equal(200, r.Status);
+        var snap = JsonNode.Parse(r.Json!, documentOptions: new System.Text.Json.JsonDocumentOptions { MaxDepth = 256 })!;
+        Assert.Equal("c/deep", (string?)snap["ops"]![1]!["layoutId"]);
     }
 
     [Fact]

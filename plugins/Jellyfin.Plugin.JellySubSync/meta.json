@@ -1,8 +1,8 @@
 {
   "guid": "a50a5959-ae3c-433d-9698-5a62df894ed6",
   "name": "JellySubSync",
-  "description": "Shift subtitles earlier or later from the TV remote (JellyXR TV app).",
-  "overview": "Pause twice quickly in Jellyfin on Android TV and the JellyXR TV app shows a subtitle sync box. JellySubSync writes a shifted copy of the subtitle track (the original stays untouched), remembers the offset per item, and the app restarts playback on the synced track.",
+  "description": "Shift subtitles earlier or later from the TV remote (JellyTvOverlay app).",
+  "overview": "Pause twice quickly in Jellyfin on Android TV and the JellyTvOverlay app (with the JellyTvOverlay plugin) shows a subtitle sync box. The older JellyXR TV app still works this release. JellySubSync writes a shifted copy of the subtitle track (the original stays untouched), remembers the offset per item, and the app restarts playback on the synced track.",
   "owner": "xJellys",
   "category": "General",
   "imagePath": "JellySubSync.png",

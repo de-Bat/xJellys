@@ -179,4 +179,38 @@ public class LayoutValidatorTests
     {
         Assert.Throws<LayoutException>(() => LayoutValidator.Validate(null!, "o"));
     }
+
+    /// <summary>A layout whose root has <paramref name="depth"/> levels of nested columns under it (root = depth 0).</summary>
+    private static string Nested(int depth)
+    {
+        var node = "{\"type\":\"text\",\"text\":\"x\"}";
+        for (var i = 0; i < depth; i++)
+        {
+            node = "{\"type\":\"column\",\"children\":[" + node + "]}";
+        }
+
+        return "{\"v\":1,\"id\":\"a\",\"root\":" + node + "}";
+    }
+
+    [Fact]
+    public void Nesting_Depth32_Accepted()
+    {
+        Assert.Equal("JellyXR/a", LayoutValidator.Validate(Nested(32), "JellyXR").Id);
+    }
+
+    [Fact]
+    public void Nesting_DeeperThan32_Throws()
+    {
+        // R20: same limit as the app's parser (deeper nodes would be dropped there)
+        var ex = Assert.Throws<LayoutException>(() => LayoutValidator.Validate(Nested(33), "JellyXR"));
+        Assert.Contains("32", ex.Message);
+    }
+
+    [Fact]
+    public void Nesting_InPreload_Checked()
+    {
+        var deep = Nested(33);
+        var json = "{\"v\":1,\"id\":\"p\",\"root\":{\"type\":\"text\"},\"preload\":[" + deep + "]}";
+        Assert.Throws<LayoutException>(() => LayoutValidator.Validate(json, "JellyXR"));
+    }
 }

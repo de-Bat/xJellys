@@ -26,6 +26,13 @@ public static class LayoutValidator
     private static readonly string[] Triggers = { "itemStart", "pause", "resume", "doublePause", "seek", "stop" };
     private static readonly string[] DefaultCloseOn = { "stop", "itemStart" };
 
+    /// <summary>Deepest node level below root (root = 0). Matches the app's parser, which drops deeper nodes.</summary>
+    public const int MaxNodeDepth = 32;
+
+    // JSON depth of a node at MaxNodeDepth is about 2 x 32 (object + children array per level), more inside preload:
+    // the parser limit is set above that, and the node depth is checked by itself
+    private static readonly JsonDocumentOptions ParseOptions = new() { MaxDepth = 256 };
+
     public static ValidatedLayout Validate(string json, string owner)
     {
         try
@@ -49,7 +56,7 @@ public static class LayoutValidator
         JsonNode? node;
         try
         {
-            node = JsonNode.Parse(json);
+            node = JsonNode.Parse(json, documentOptions: ParseOptions);
         }
         catch (JsonException ex)
         {
@@ -125,6 +132,7 @@ public static class LayoutValidator
             throw new LayoutException("root is required and must be an object");
         }
 
+        CheckDepth(root, 0);
         var valueIds = new HashSet<string>(StringComparer.Ordinal);
         CollectValueIds(root, valueIds);
         ValidateKeys(obj["keys"], valueIds);
@@ -201,6 +209,25 @@ public static class LayoutValidator
         }
 
         return list.ToArray();
+    }
+
+    private static void CheckDepth(JsonObject node, int depth)
+    {
+        if (depth > MaxNodeDepth)
+        {
+            throw new LayoutException($"nodes nest deeper than {MaxNodeDepth} levels");
+        }
+
+        if (node["children"] is JsonArray children)
+        {
+            foreach (var c in children)
+            {
+                if (c is JsonObject co)
+                {
+                    CheckDepth(co, depth + 1);
+                }
+            }
+        }
     }
 
     private static void CollectValueIds(JsonNode? node, HashSet<string> ids)
