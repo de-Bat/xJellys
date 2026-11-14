@@ -145,6 +145,10 @@ Regenerate after tagging a release.
 
 ## Jellyfin.Plugin.JellyXR
 
+### 1.8.1.0 (2026-11-14)
+
+- JellyXR 1.8.1.0: episode and scene line on pause cards, CHANGELOG (9f9d60c)
+
 ### 1.8.0.0 (2026-11-12)
 
 - JellyXR 1.8.0.0: card language, TMDB-id matching, poster badge, start chip (5c62486)
