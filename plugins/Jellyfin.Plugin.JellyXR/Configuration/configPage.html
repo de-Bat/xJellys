@@ -73,6 +73,11 @@
         <button id="addSeries" is="emby-button" type="button" class="raised block"><span>Add show</span></button>
         <div id="rules" style="margin-top:1em"></div>
 
+        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:2em">
+          <label class="emby-checkbox-label"><input id="DebugTools" type="checkbox" is="emby-checkbox" /><span>Debug tools</span></label>
+          <div class="fieldDescription">Adds a Debug section below: what JellyXR looks up and shows for an item, and a read-only REST client for the Xrayarr API (GET only, sent by this server with the saved URL and key). Save to enable.</div>
+        </div>
+
         <button is="emby-button" type="submit" class="raised button-submit block"><span>Save</span></button>
       </form>
 
@@ -93,6 +98,40 @@
       </div>
       <div id="tlMsg" class="fieldDescription" style="margin-top:.8em"></div>
       <div id="tlView"></div>
+
+      <div id="dbg" style="display:none">
+        <h3 style="margin-top:2.5em">Debug</h3>
+        <div class="fieldDescription">Uses the item picked in the Cast timeline viewer above. Needs <em>Debug tools</em> saved on.</div>
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="dbgPos">Position (seconds, or h:mm:ss)</label>
+          <input id="dbgPos" type="text" is="emby-input" value="0" autocomplete="off" />
+        </div>
+        <div style="display:flex;gap:.6em;flex-wrap:wrap">
+          <button id="dbgItem" is="emby-button" type="button" class="raised"><span>Item debug info</span></button>
+          <button id="dbgFresh" is="emby-button" type="button" class="raised"><span>Fresh (drop Xrayarr cache)</span></button>
+        </div>
+
+        <h4 style="margin:1.6em 0 .4em">Xrayarr REST client</h4>
+        <div class="selectContainer">
+          <label class="selectLabel" for="dbgPreset">Endpoint</label>
+          <select id="dbgPreset" is="emby-select"></select>
+        </div>
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="dbgPath">Path</label>
+          <input id="dbgPath" type="text" is="emby-input" autocomplete="off" />
+        </div>
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="dbgQuery">Query (no leading ?)</label>
+          <input id="dbgQuery" type="text" is="emby-input" autocomplete="off" />
+          <div class="fieldDescription">Item endpoints get the item's Xrayarr identity (the first lookup JellyXR tries) and <code>t</code> from the position.</div>
+        </div>
+        <div style="display:flex;gap:.6em;flex-wrap:wrap">
+          <button id="dbgSend" is="emby-button" type="button" class="raised button-submit"><span>Send GET</span></button>
+          <button id="dbgCopy" is="emby-button" type="button" class="raised"><span>Copy result</span></button>
+        </div>
+        <div id="dbgMeta" class="fieldDescription" style="margin-top:.8em;word-break:break-all"></div>
+        <pre id="dbgOut" style="margin-top:.6em;max-height:36em;overflow:auto;padding:.8em 1em;border-radius:6px;background:rgba(128,128,128,.15);font-size:.8em;white-space:pre-wrap;word-break:break-word"></pre>
+      </div>
     </div>
   </div>
   <script type="text/javascript">
@@ -226,6 +265,8 @@
           page.querySelector('#ScanOnPlayback').checked = c.ScanOnPlayback;
           page.querySelector('#ShowAppearance').checked = c.ShowAppearance !== false;
           page.querySelector('#ShowSceneInfo').checked = c.ShowSceneInfo !== false;
+          page.querySelector('#DebugTools').checked = c.DebugTools === true;
+          page.querySelector('#dbg').style.display = c.DebugTools === true ? '' : 'none';
           page.querySelector('#AppendRestOfCast').checked = c.AppendRestOfCast !== false;
           page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
           page.querySelector('#WebOverlay').checked = c.WebOverlay !== false;
@@ -311,6 +352,131 @@
         page.querySelector('#tlRescan').addEventListener('click', function () { scan(true); });
       })();
 
+      // ---- debug tools (opt-in) ----
+      (function () {
+        var pick = page.querySelector('#tlPick');
+        var pos = page.querySelector('#dbgPos');
+        var preset = page.querySelector('#dbgPreset');
+        var path = page.querySelector('#dbgPath');
+        var query = page.querySelector('#dbgQuery');
+        var meta = page.querySelector('#dbgMeta');
+        var out = page.querySelector('#dbgOut');
+        // [label, path, query template]; {id} = item identity, {t} = position in seconds, {t60} = a minute later
+        var presets = [
+          ['System: ping', '/api/v1/system/ping', ''],
+          ['System: status', '/api/v1/system/status', ''],
+          ['System: changelog', '/api/v1/system/changelog', ''],
+          ['System: tasks', '/api/v1/system/task', ''],
+          ['X-Ray: timeline (item)', '/api/v1/xray/timeline', '{id}'],
+          ['X-Ray: at position (item)', '/api/v1/xray/at', '{id}&t={t}'],
+          ['X-Ray: scenes (item)', '/api/v1/xray/scenes', '{id}'],
+          ['X-Ray: scenes around position (item)', '/api/v1/xray/scenes', '{id}&start={t}&end={t60}'],
+          ['X-Ray: scenes as WebVTT (item)', '/api/v1/xray/scenes', '{id}&format=vtt'],
+          ['X-Ray: cast (item)', '/api/v1/xray/cast', '{id}'],
+          ['Library: movies', '/api/v1/movie', ''],
+          ['Library: series', '/api/v1/series', ''],
+          ['People: search', '/api/v1/person', 'search=&pageSize=20'],
+          ['Jobs: queue', '/api/v1/queue', ''],
+          ['Jobs: history', '/api/v1/history', 'pageSize=20'],
+          ['Custom', '', '']
+        ];
+        preset.innerHTML = presets.map(function (p, i) { return '<option value="' + i + '">' + esc(p[0]) + '</option>'; }).join('');
+        var identity = { id: null, query: null };
+
+        function seconds() {
+          var v = pos.value.trim();
+          if (!v) { return 0; }
+          var parts = v.split(':').map(function (x) { return parseFloat(x) || 0; });
+          return Math.max(0, Math.round(parts.reduce(function (a, x) { return a * 60 + x; }, 0)));
+        }
+
+        function fail(xhr, what) {
+          var msg = what + ' failed';
+          if (xhr && xhr.status) { msg += ' (HTTP ' + xhr.status + ')'; }
+          meta.style.color = '#cc3333';
+          meta.textContent = msg;
+          if (xhr && typeof xhr.text === 'function') {
+            xhr.text().then(function (t) {
+              try { var j = JSON.parse(t); if (j.error) { meta.textContent = msg + ': ' + j.error; } } catch (e) { }
+            });
+          }
+        }
+
+        function itemInfo(fresh) {
+          if (!pick.value) {
+            meta.style.color = '';
+            meta.textContent = 'Search and pick an item in the Cast timeline viewer first.';
+            return Promise.reject(null);
+          }
+          return ApiClient.getJSON(ApiClient.getUrl('JellyXR/Xrayarr/Debug/Item/' + pick.value, { positionSeconds: seconds(), fresh: !!fresh })).then(function (d) {
+            identity = { id: pick.value, query: d.Lookups && d.Lookups.length ? d.Lookups[0].query : null };
+            return d;
+          });
+        }
+
+        function showItem(fresh) {
+          meta.style.color = '';
+          meta.textContent = 'Loading...';
+          itemInfo(fresh).then(function (d) {
+            meta.textContent = 'Item debug info at ' + seconds() + ' s · Xrayarr lookup ' + d.XrayarrLookupMs + ' ms (cached after the first)';
+            out.textContent = JSON.stringify(d, null, 2);
+          }, function (xhr) { if (xhr) { fail(xhr, 'Item debug info'); } });
+        }
+
+        function fill() {
+          var p = presets[+preset.value];
+          if (!p[1]) { return; }
+          path.value = p[1];
+          if (p[2].indexOf('{id}') < 0) {
+            query.value = p[2];
+            return;
+          }
+          var ready = identity.id === pick.value && identity.query ? Promise.resolve() : itemInfo(false);
+          ready.then(function () {
+            if (!identity.query) { meta.textContent = 'JellyXR has no Xrayarr identity for this item (no TMDB/TVDB id or path).'; return; }
+            var t = seconds();
+            query.value = p[2].replace('{id}', identity.query).replace('{t60}', t + 60).replace('{t}', t);
+            meta.style.color = '';
+            meta.textContent = '';
+          }, function (xhr) { if (xhr) { fail(xhr, 'Item lookup'); } });
+        }
+
+        function send() {
+          meta.style.color = '';
+          meta.textContent = 'Sending...';
+          out.textContent = '';
+          ApiClient.ajax({
+            type: 'POST',
+            url: ApiClient.getUrl('JellyXR/Xrayarr/Debug/Request'),
+            data: JSON.stringify({ Path: path.value, Query: query.value }),
+            contentType: 'application/json',
+            dataType: 'json'
+          }).then(function (r) {
+            var ok = r.Status >= 200 && r.Status < 300;
+            meta.style.color = r.Error ? '#cc3333' : (ok ? '#52b54b' : '#e0a030');
+            meta.textContent = (r.Error ? '✖ ' + r.Error : 'HTTP ' + r.Status) + ' · ' + r.Ms + ' ms' +
+              (r.ContentType ? ' · ' + r.ContentType : '') + (r.Truncated ? ' · truncated at 512 KB' : '') + ' · GET ' + r.url;
+            var body = r.Body || '';
+            try { body = JSON.stringify(JSON.parse(body), null, 2); } catch (e) { }
+            out.textContent = body;
+          }, function (xhr) { fail(xhr, 'Request'); });
+        }
+
+        preset.addEventListener('change', fill);
+        page.querySelector('#dbgItem').addEventListener('click', function () { showItem(false); });
+        page.querySelector('#dbgFresh').addEventListener('click', function () { showItem(true); });
+        page.querySelector('#dbgSend').addEventListener('click', send);
+        page.querySelector('#dbgCopy').addEventListener('click', function () {
+          var text = meta.textContent + '\n\n' + out.textContent;
+          if (navigator.clipboard) { navigator.clipboard.writeText(text).then(function () { meta.textContent += ' · copied'; }, function () { }); }
+        });
+        page.querySelector('#DebugTools').addEventListener('change', function (e) {
+          if (e.target.checked) { page.querySelector('#dbg').style.display = ''; }
+        });
+        pick.addEventListener('change', function () { identity = { id: null, query: null }; });
+        fill();
+      })();
+
       page.querySelector('#JellyXRConfigForm').addEventListener('submit', function (e) {
         e.preventDefault();
         Dashboard.showLoadingMsg();
@@ -320,6 +486,7 @@
           c.ScanOnPlayback = page.querySelector('#ScanOnPlayback').checked;
           c.ShowAppearance = page.querySelector('#ShowAppearance').checked;
           c.ShowSceneInfo = page.querySelector('#ShowSceneInfo').checked;
+          c.DebugTools = page.querySelector('#DebugTools').checked;
           c.AppendRestOfCast = page.querySelector('#AppendRestOfCast').checked;
           c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
           c.WebOverlay = page.querySelector('#WebOverlay').checked;
@@ -335,7 +502,10 @@
             var v = page.querySelector('#' + f[0]).value;
             c[f[0]] = f[2] === 'number' ? parseInt(v, 10) : (f[2] === 'float' ? parseFloat(v) : v);
           });
-          ApiClient.updatePluginConfiguration(guid, c).then(Dashboard.processPluginConfigurationUpdateResult);
+          ApiClient.updatePluginConfiguration(guid, c).then(function (r) {
+            page.querySelector('#dbg').style.display = c.DebugTools ? '' : 'none';
+            Dashboard.processPluginConfigurationUpdateResult(r);
+          });
         });
         return false;
       });

@@ -209,6 +209,82 @@ public sealed class XrayarrClient
         }
     }
 
+    /// <summary>Drops the cached timeline of an item, so the next lookup asks Xrayarr again.</summary>
+    public void Forget(Guid itemId) => _cache.TryRemove(itemId, out _);
+
+    /// <summary>Lookup query strings JellyXR tries for the item, in order (debug view).</summary>
+    public static IReadOnlyList<string> LookupsFor(BaseItem item, Configuration.PluginConfiguration cfg) => Identities(item, cfg).ToList();
+
+    /// <summary>Largest response body the debug client hands back.</summary>
+    internal const int DebugMaxBody = 512 * 1024;
+
+    /// <summary>
+    /// Debug client URL: the saved base plus an <c>/api/v1/...</c> path and query. Null for anything else (other hosts,
+    /// schemes, dot segments, fragments), so the proxy can only read this Xrayarr's API.
+    /// </summary>
+    internal static string? DebugUrl(string? baseUrl, string? path, string? query)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) || !Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var root)
+            || root.Scheme is not ("http" or "https") || string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var p = path.Trim();
+        if (!p.StartsWith("/api/v1/", StringComparison.Ordinal) || p.Contains("..", StringComparison.Ordinal)
+            || p.IndexOfAny(new[] { '?', '#', '\\', '@' }) >= 0 || p.Contains("//", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var q = (query ?? string.Empty).Trim().TrimStart('?');
+        if (q.Contains('#', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var url = root.ToString().TrimEnd('/') + p + (q.Length > 0 ? "?" + q : string.Empty);
+        return Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Host == root.Host && u.Port == root.Port ? url : null;
+    }
+
+    /// <summary>GET against the saved Xrayarr with the saved key (debug client). The key is never part of the result.</summary>
+    public async Task<(int Status, long Ms, string? ContentType, string Body, bool Truncated, string? Error)> DebugGetAsync(
+        Configuration.PluginConfiguration cfg, string url, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Accept.ParseAdd("application/json");
+        if (!string.IsNullOrWhiteSpace(cfg.XrayarrApiKey))
+        {
+            req.Headers.Add("X-Api-Key", cfg.XrayarrApiKey.Trim());
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            using var res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            await using var stream = await res.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            var buf = new byte[DebugMaxBody + 1];
+            var read = 0;
+            int n;
+            while (read < buf.Length && (n = await stream.ReadAsync(buf.AsMemory(read, buf.Length - read), ct).ConfigureAwait(false)) > 0)
+            {
+                read += n;
+            }
+
+            var truncated = read > DebugMaxBody;
+            var body = System.Text.Encoding.UTF8.GetString(buf, 0, Math.Min(read, DebugMaxBody));
+            return ((int)res.StatusCode, sw.ElapsedMilliseconds, res.Content.Headers.ContentType?.ToString(), body, truncated, null);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return (0, sw.ElapsedMilliseconds, null, string.Empty, false, "timed out");
+        }
+        catch (HttpRequestException ex)
+        {
+            return (0, sw.ElapsedMilliseconds, null, string.Empty, false, ex.Message);
+        }
+    }
+
     /// <summary>Checks URL and key without touching the saved settings. Returns a human readable verdict.</summary>
     public async Task<(bool Ok, string Message)> TestAsync(string? baseUrl, string? apiKey, CancellationToken ct)
     {
@@ -338,7 +414,7 @@ public sealed class XrayarrClient
     }
 
     /// <summary>Lookup forms in preference order: tmdbId (movies), tvdbId + season + episode (episodes), then the file path.</summary>
-    private static IEnumerable<string> Identities(BaseItem item, Configuration.PluginConfiguration cfg)
+    internal static IEnumerable<string> Identities(BaseItem item, Configuration.PluginConfiguration cfg)
     {
         static string Q(string k, string v) => k + "=" + Uri.EscapeDataString(v);
 

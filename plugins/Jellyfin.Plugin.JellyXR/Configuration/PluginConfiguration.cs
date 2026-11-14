@@ -87,6 +87,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Add a context line to the cast display: episode (S01E03) and, with Xrayarr, the scene at the pause point.</summary>
     public bool ShowSceneInfo { get; set; } = true;
 
+    /// <summary>Opt-in debug tools on the settings page: per item lookup info and a read-only REST client for Xrayarr.</summary>
+    public bool DebugTools { get; set; }
+
     /// <summary>Add the cast timeline section to movie and episode pages of the Jellyfin web client.</summary>
     public bool InjectWebUi { get; set; } = true;
 
