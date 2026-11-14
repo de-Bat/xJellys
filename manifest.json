@@ -100,6 +100,14 @@
     "imageUrl": "https://raw.githubusercontent.com/de-Bat/xJellys/main/plugins/Jellyfin.Plugin.JellyXR/XRayarr.png",
     "versions": [
       {
+        "version": "1.8.1.0",
+        "changelog": "1.8.1.0: Pause cards show the episode and, with Xrayarr, the current scene (\"S01E03 \u00b7 Scene 12 of 85 \u00b7 12:30\u201314:05\"; setting ShowSceneInfo). Repository CHANGELOG.md lists the commits behind every release. 1.8.0.0: Actor and character names in a chosen language (TMDB, English fallback); Xrayarr people are matched to the Jellyfin cast by TMDB person id; optional X-RAY badge on posters; X-Ray chip when a title with X-Ray data starts playing. 1.7.0.0: Cast panel works with the JellyTvOverlay app (JellyXR TV is still supported this release); new actor detail with bio and titles in your library. 1.6.0.0: X-Ray items are no longer added to an \"X-Ray\" collection; the collection earlier versions created is deleted on the first marker sync (the next playback or the \"Mark items with X-Ray data\" task). The \"X-Ray\" tag and the optional genre stay.",
+        "targetAbi": "10.9.0.0",
+        "sourceUrl": "https://github.com/de-Bat/xJellys/releases/download/Jellyfin.Plugin.JellyXR-v1.8.1.0/Jellyfin.Plugin.JellyXR_1.8.1.0.zip",
+        "checksum": "D81D1C1DB335C5222D0C326B56E02432",
+        "timestamp": "2026-11-14T09:12:52Z"
+      },
+      {
         "version": "1.8.0.0",
         "changelog": "1.8.0.0: Actor and character names in a chosen language (TMDB, English fallback); Xrayarr people are matched to the Jellyfin cast by TMDB person id; optional X-RAY badge on posters; X-Ray chip when a title with X-Ray data starts playing. 1.7.0.0: Cast panel works with the JellyTvOverlay app (JellyXR TV is still supported this release); new actor detail with bio and titles in your library. 1.6.0.0: X-Ray items are no longer added to an \"X-Ray\" collection; the collection earlier versions created is deleted on the first marker sync (the next playback or the \"Mark items with X-Ray data\" task). The \"X-Ray\" tag and the optional genre stay.",
         "targetAbi": "10.9.0.0",
