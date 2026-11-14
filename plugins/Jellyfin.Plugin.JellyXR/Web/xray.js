@@ -151,6 +151,7 @@
     '-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.45);font-size:.95em;animation:jxr-in .18s ease-out}',
     '@keyframes jxr-in{from{opacity:0;transform:translateX(1em)}to{opacity:1;transform:none}}',
     '.jxr-ov-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.7em}',
+    '.jxr-ov-ctx{margin:-.55em 0 .7em;font-size:.8em;opacity:.65;font-variant-numeric:tabular-nums}',
     '.jxr-ov-head b{font-size:1.05em;letter-spacing:.02em}',
     '.jxr-ov-x{background:none;border:0;color:inherit;font-size:1.4em;line-height:1;cursor:pointer;opacity:.7;padding:0 .2em}',
     '.jxr-ov-x:hover{opacity:1}',
@@ -194,7 +195,8 @@
     var on = d.Cards.filter(function (c) { return c.OnScreen; });
     var rest = d.Cards.filter(function (c) { return !c.OnScreen; });
     var html = '<div class="jxr-ov-head"><b>' + (on.length ? 'On screen' : esc(d.Header || 'Cast')) + '</b>' +
-      '<button class="jxr-ov-x" type="button" title="Close">×</button></div>';
+      '<button class="jxr-ov-x" type="button" title="Close">×</button></div>' +
+      (d.Context ? '<div class="jxr-ov-ctx" dir="auto">' + esc(d.Context) + '</div>' : '');
     html += (on.length ? on : rest).map(function (c) { return ovCard(c, false); }).join('');
     if (on.length && rest.length) {
       html += '<div class="jxr-ov-sec">Also in cast</div>' + rest.map(function (c) { return ovCard(c, true); }).join('');

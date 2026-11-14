@@ -231,4 +231,26 @@ public class CastLayoutBuilderTests
 
         Assert.Equal("JellyXR/cast", LayoutValidator.Validate(layout.ToJsonString(), "JellyXR").Id);
     }
+    [Fact]
+    public void Context_IsALineUnderEachPageTitle_AndPassesValidator()
+    {
+        var cards = Enumerable.Range(0, 12).Select(i => Person("P" + i, onScreen: i < 3)).ToList();
+        var set = new CardSet("Cast", cards, "S01E03 · Scene 12 of 85 · 12:30–14:05");
+        var layout = CastLayoutBuilder.Build(set, interactive: false);
+
+        var pages = PagesOf(layout)["children"]!.AsArray();
+        Assert.All(pages, p => Assert.Contains(Walk(p), n => Str(n["text"]) == set.Context));
+        Assert.True(layout["root"]!["h"]!.GetValue<double>() <= 0.9);
+        Assert.Equal("JellyXR/cast", LayoutValidator.Validate(layout.ToJsonString(), "JellyXR").Id);
+    }
+
+    [Fact]
+    public void Context_LeavesLessRoomForRows()
+    {
+        var cards = Enumerable.Range(0, 20).Select(i => Person("P" + i, onScreen: true)).ToList();
+        var plain = CastLayoutBuilder.Paginate(new CardSet("Cast", cards));
+        var withCtx = CastLayoutBuilder.Paginate(new CardSet("Cast", cards, "Scene 1 of 9"));
+        Assert.True(withCtx[0].Entries.Count <= plain[0].Entries.Count);
+        Assert.Equal(20, withCtx.Sum(p => p.Entries.OfType<Card>().Count()));
+    }
 }

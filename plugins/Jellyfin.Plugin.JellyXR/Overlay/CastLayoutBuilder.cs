@@ -16,7 +16,7 @@ public static class CastLayoutBuilder
     // CastPanel sizes in dp, and the 540 dp screen height they are measured against (1080p at density 2).
     private const double ScreenDp = 540;
     private const int Big = 64, Small = 44, Section = 34, Gap = 10;
-    private const int PadDp = 14, HeaderDp = 26;
+    private const int PadDp = 14, HeaderDp = 26, ContextDp = 18;
     private static readonly int Budget = Math.Max(Big * 3, (int)ScreenDp - 56 - 28 - 40);
 
     private const double PanelX = 0.62, PanelW = 0.36, PanelY = 0.05, PanelMaxH = 0.9;
@@ -38,7 +38,8 @@ public static class CastLayoutBuilder
         var pages = Paginate(set);
         var split = set.Cards.Any(c => c.OnScreen) && set.Cards.Any(c => !c.OnScreen);
         var maxUsed = pages.Count == 0 ? 0 : pages.Max(p => UsedDp(p, split));
-        var h = Math.Min(PanelMaxH, Frac((2 * PadDp) + HeaderDp + maxUsed));
+        var ctxDp = string.IsNullOrEmpty(set.Context) ? 0 : ContextDp + Gap;
+        var h = Math.Min(PanelMaxH, Frac((2 * PadDp) + HeaderDp + ctxDp + maxUsed));
 
         // node h is a fraction of the parent's inner box (layout v1), here the panel minus its pad: row heights in
         // screen dp are converted against it
@@ -47,7 +48,7 @@ public static class CastLayoutBuilder
         var rowIndex = 0;
         for (var i = 0; i < pages.Count; i++)
         {
-            pageNodes.Add(PageNode(pages[i], i, pages.Count, split, interactive, innerDp, ref rowIndex));
+            pageNodes.Add(PageNode(pages[i], i, pages.Count, split, interactive, innerDp, set.Context, ref rowIndex));
         }
 
         return new JsonObject
@@ -86,13 +87,15 @@ public static class CastLayoutBuilder
         List<object>? cur = null;
         string? section = null;
         var used = 0;
+        // the context line under each page title takes room from the rows
+        var budget = Budget - (string.IsNullOrEmpty(set.Context) ? 0 : ContextDp + Gap);
         foreach (var c in on.Concat(rest))
         {
             var sec = c.OnScreen ? "On screen" : on.Count == 0 ? (string.IsNullOrEmpty(set.Header) ? "Cast" : set.Header) : "Also in cast";
             var h = RowDp(c, split) + Gap;
             var newSection = sec != section;
             var need = h + (newSection && cur is { Count: > 0 } ? Section : 0);
-            if (cur is null || used + need > Budget)
+            if (cur is null || used + need > budget)
             {
                 cur = new List<object>();
                 pages.Add((sec, cur));
@@ -120,7 +123,7 @@ public static class CastLayoutBuilder
     private static int UsedDp(Page page, bool split) =>
         page.Entries.Sum(e => e is Card c ? RowDp(c, split) + Gap : Section);
 
-    private static JsonObject PageNode(Page page, int index, int count, bool split, bool interactive, double innerDp, ref int rowIndex)
+    private static JsonObject PageNode(Page page, int index, int count, bool split, bool interactive, double innerDp, string? context, ref int rowIndex)
     {
         var header = new JsonArray { Text(page.Title, 17, "#FFFFFFFF", bold: true) };
         if (count > 1)
@@ -132,6 +135,11 @@ public static class CastLayoutBuilder
         {
             new JsonObject { ["type"] = "row", ["gap"] = Frac(12), ["children"] = header },
         };
+        if (!string.IsNullOrEmpty(context))
+        {
+            children.Add(Text(context, 12, "#A0FFFFFF"));
+        }
+
         foreach (var e in page.Entries)
         {
             if (e is string sec)

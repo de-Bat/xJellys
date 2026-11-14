@@ -24,6 +24,9 @@
           <label class="emby-checkbox-label"><input id="ShowAppearance" type="checkbox" is="emby-checkbox" /><span>Add appearance info to cards ("34 min on screen, next at 1:12:40")</span></label>
         </div>
         <div class="checkboxContainer checkboxContainer-withDescription">
+          <label class="emby-checkbox-label"><input id="ShowSceneInfo" type="checkbox" is="emby-checkbox" /><span>Show episode and scene above the cast ("S01E03 · Scene 12 of 85 · 12:30–14:05"; scenes need Xrayarr)</span></label>
+        </div>
+        <div class="checkboxContainer checkboxContainer-withDescription">
           <label class="emby-checkbox-label"><input id="InjectWebUi" type="checkbox" is="emby-checkbox" /><span>Show the cast timeline on movie and episode pages of the web client (restart Jellyfin after changing)</span></label>
           <div class="fieldDescription">Edits jellyfin-web's index.html, or uses the File Transformation plugin when installed (needed if the web folder is read-only). Not available in the Android TV app.</div>
         </div>
@@ -222,6 +225,7 @@
           page.querySelector('#ShowCharacter').checked = c.ShowCharacter;
           page.querySelector('#ScanOnPlayback').checked = c.ScanOnPlayback;
           page.querySelector('#ShowAppearance').checked = c.ShowAppearance !== false;
+          page.querySelector('#ShowSceneInfo').checked = c.ShowSceneInfo !== false;
           page.querySelector('#AppendRestOfCast').checked = c.AppendRestOfCast !== false;
           page.querySelector('#InjectWebUi').checked = c.InjectWebUi !== false;
           page.querySelector('#WebOverlay').checked = c.WebOverlay !== false;
@@ -315,6 +319,7 @@
           c.ShowCharacter = page.querySelector('#ShowCharacter').checked;
           c.ScanOnPlayback = page.querySelector('#ScanOnPlayback').checked;
           c.ShowAppearance = page.querySelector('#ShowAppearance').checked;
+          c.ShowSceneInfo = page.querySelector('#ShowSceneInfo').checked;
           c.AppendRestOfCast = page.querySelector('#AppendRestOfCast').checked;
           c.InjectWebUi = page.querySelector('#InjectWebUi').checked;
           c.WebOverlay = page.querySelector('#WebOverlay').checked;

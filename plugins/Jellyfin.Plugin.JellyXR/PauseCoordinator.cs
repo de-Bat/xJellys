@@ -214,6 +214,10 @@ public sealed class PauseCoordinator : IHostedService
         foreach (var group in set.Cards.GroupBy(c => c.OnScreen).OrderByDescending(g => g.Key))
         {
             var header = group.Key ? "On screen" : set.Cards.Any(c => c.OnScreen) ? "Also in cast" : set.Header;
+            if (!string.IsNullOrEmpty(set.Context))
+            {
+                header += " · " + set.Context;
+            }
             var items = group.Select(c => CardService.Format(c, cfg.ShowCharacter)).ToList();
             if (cfg.CardMode == CardMode.Separate)
             {

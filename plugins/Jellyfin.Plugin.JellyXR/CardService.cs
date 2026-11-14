@@ -13,7 +13,8 @@ namespace Jellyfin.Plugin.JellyXR;
 /// <param name="TmdbId">TMDB person id, when known (from Xrayarr or Jellyfin).</param>
 public readonly record struct Card(string Actor, string? Character, string? Info = null, bool OnScreen = false, Guid? PersonId = null, string? ImageUrl = null, string? Canonical = null, int? TmdbId = null);
 
-public readonly record struct CardSet(string Header, IReadOnlyList<Card> Cards);
+/// <param name="Context">Where the pause is: "S01E03 · Scene 12 of 85 · 12:30–14:05". Null when off or unknown.</param>
+public readonly record struct CardSet(string Header, IReadOnlyList<Card> Cards, string? Context = null);
 
 /// <summary>Decides who to show for an item and pause position.</summary>
 public sealed class CardService
@@ -163,7 +164,62 @@ public sealed class CardService
         };
 
         var result = set is { } s && cfg.ShowAppearance ? await WithAppearanceAsync(item, s, sec, cfg, ct).ConfigureAwait(false) : set;
+        if (result is { } withCtx && cfg.ShowSceneInfo)
+        {
+            result = withCtx with { Context = await ContextAsync(item, positionTicks, cfg, ct).ConfigureAwait(false) };
+        }
+
         return result is { } r ? await LocalizeAsync(item, r, cfg, ct).ConfigureAwait(false) : result;
+    }
+
+    /// <summary>Episode and scene line for the pause position; null when neither is known.</summary>
+    private async Task<string?> ContextAsync(BaseItem item, long positionTicks, Configuration.PluginConfiguration cfg, CancellationToken ct)
+    {
+        XrayarrTimeline? xr = null;
+        if (SourcesFor(cfg).Contains(DataSource.Xrayarr))
+        {
+            try
+            {
+                xr = await _xrayarr.GetAsync(item, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("No scene context for {Item}: {Error}", item.Name, ex.Message);
+            }
+        }
+
+        var ep = item as Episode;
+        return Context(ep?.ParentIndexNumber, ep?.IndexNumber, xr, (long)TimeSpan.FromTicks(positionTicks).TotalMilliseconds);
+    }
+
+    /// <summary>
+    /// "S01E03 · Scene 12 of 85 · 12:30–14:05". Xrayarr's season/episode win over Jellyfin's (same file, but Xrayarr
+    /// names the copy it scanned); the scene part needs Xrayarr segments.
+    /// </summary>
+    public static string? Context(int? season, int? episode, XrayarrTimeline? xr, long atMs)
+    {
+        var parts = new List<string>();
+        if (xr is { Season: { } xs, Episode: { } xe } && !string.Equals(xr.Kind, "movie", StringComparison.OrdinalIgnoreCase))
+        {
+            (season, episode) = (xs, xe);
+        }
+
+        if (season is { } s && episode is { } e)
+        {
+            parts.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"S{s:00}E{e:00}"));
+        }
+
+        if (xr?.SceneAt(atMs) is { } scene)
+        {
+            parts.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Scene {scene.Number} of {xr.SceneCount}"));
+            parts.Add(CastTimelineService.Clock((int)(scene.Segment.StartMs / 1000)) + "–" + CastTimelineService.Clock((int)(scene.Segment.EndMs / 1000)));
+        }
+
+        return parts.Count == 0 ? null : string.Join(" · ", parts);
     }
 
     /// <summary>Swaps actor and character for the configured language; whatever TMDB lacks stays as it was.</summary>

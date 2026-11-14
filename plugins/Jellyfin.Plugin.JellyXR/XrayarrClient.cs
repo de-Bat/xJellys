@@ -32,6 +32,10 @@ public sealed class XrayarrPerson
 
 public sealed class XrayarrSegment
 {
+    /// <summary>0-based scene number (newer Xrayarr); null from older servers.</summary>
+    [JsonPropertyName("index")]
+    public int? Index { get; set; }
+
     [JsonPropertyName("startMs")]
     public long StartMs { get; set; }
 
@@ -57,7 +61,45 @@ public sealed class XrayarrTimeline
     [JsonPropertyName("segments")]
     public List<XrayarrSegment> Segments { get; set; } = new();
 
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    /// <summary>"movie" or "episode" (newer Xrayarr).</summary>
+    [JsonPropertyName("kind")]
+    public string? Kind { get; set; }
+
+    [JsonPropertyName("season")]
+    public int? Season { get; set; }
+
+    [JsonPropertyName("episode")]
+    public int? Episode { get; set; }
+
+    [JsonPropertyName("year")]
+    public int? Year { get; set; }
+
+    [JsonPropertyName("durationMs")]
+    public long? DurationMs { get; set; }
+
     public bool IsReady => string.Equals(Status, "ready", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The scene holding <paramref name="atMs"/> with its 1-based number, or null between scenes.</summary>
+    public (XrayarrSegment Segment, int Number)? SceneAt(long atMs)
+    {
+        var ordered = Segments.OrderBy(s => s.StartMs).ToList();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var s = ordered[i];
+            if (s.StartMs <= atMs && atMs < s.EndMs)
+            {
+                return (s, (s.Index ?? i) + 1);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Scene count: the highest index + 1 when Xrayarr numbers them, else the segment count.</summary>
+    public int SceneCount => Segments.Count == 0 ? 0 : Math.Max(Segments.Count, Segments.Max(s => s.Index ?? -1) + 1);
 
     /// <summary>People in segments overlapping [fromMs, toMs]; the segment holding <paramref name="atMs"/> first, in Xrayarr's order.</summary>
     public List<XrayarrPerson> PeopleAround(long atMs, long fromMs, long toMs)

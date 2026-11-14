@@ -84,6 +84,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Add appearance info to each card: time on screen and when the actor is next seen.</summary>
     public bool ShowAppearance { get; set; } = true;
 
+    /// <summary>Add a context line to the cast display: episode (S01E03) and, with Xrayarr, the scene at the pause point.</summary>
+    public bool ShowSceneInfo { get; set; } = true;
+
     /// <summary>Add the cast timeline section to movie and episode pages of the Jellyfin web client.</summary>
     public bool InjectWebUi { get; set; } = true;
 

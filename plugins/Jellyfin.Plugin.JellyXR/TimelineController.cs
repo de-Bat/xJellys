@@ -66,6 +66,7 @@ public sealed class TimelineController : ControllerBase
         return new
         {
             set.Value.Header,
+            set.Value.Context,
             OverlaySeconds = Math.Max(0, cfg.OverlaySeconds),
             Cards = set.Value.Cards.Select(c =>
             {
