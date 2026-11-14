@@ -145,6 +145,10 @@ Regenerate after tagging a release.
 
 ## Jellyfin.Plugin.JellyXR
 
+### 1.8.2.0 (2026-11-14)
+
+- JellyXR 1.8.2.0: opt-in debug tools and Xrayarr REST client (917ade9)
+
 ### 1.8.1.0 (2026-11-14)
 
 - JellyXR 1.8.1.0: episode and scene line on pause cards, CHANGELOG (9f9d60c)
